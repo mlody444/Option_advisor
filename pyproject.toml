@@ -1,0 +1,18 @@
+[build-system]
+requires      = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name            = "option-advisor"
+version         = "0.1.0"
+description     = "IBKR options data collector and analyzer"
+readme          = "README.md"
+requires-python = "==3.11.*"
+authors         = [{ email = "mlody240@gmail.com" }]
+
+dependencies = [
+    "ibapi==10.37.2",
+    "numpy==2.4.4",
+    "PyQt6==6.11.0",
+    "pyqtgraph==0.14.0",
+]

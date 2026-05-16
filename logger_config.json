@@ -1,0 +1,25 @@
+{
+    "symbol": "SPX",
+    "output_dir": "snapshots",
+
+    "tiers": [
+        {
+            "name": "hot",
+            "dte_max": 14,
+            "strike_count": 100,
+            "atm_range_pct": 0.05
+        },
+        {
+            "name": "warm",
+            "dte_max": 90,
+            "strike_count": 160,
+            "atm_range_pct": 0.10
+        },
+        {
+            "name": "cold",
+            "dte_max": 730,
+            "strike_count": 250,
+            "atm_range_pct": 0.20
+        }
+    ]
+}
