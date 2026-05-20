@@ -16,3 +16,8 @@ dependencies = [
     "PyQt6==6.11.0",
     "pyqtgraph==0.14.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pydoclint>=0.8.4",
+]

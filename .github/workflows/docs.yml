@@ -1,0 +1,37 @@
+# Workflow name — displayed in the GitHub Actions tab
+name: Documentation
+
+# When to run this workflow
+on:
+  pull_request:         # run on every pull request (any branch → any branch)
+  push:
+    branches: [main]    # also run when code is pushed directly to main
+
+# Jobs are independent units of work that run on separate virtual machines.
+# Multiple jobs run in parallel by default; steps within a job run sequentially.
+jobs:
+
+  # Job name — shown in GitHub UI and used in branch protection rules
+  pydoclint:
+
+    # GitHub provides a fresh Ubuntu Linux virtual machine for each run
+    runs-on: ubuntu-latest
+
+    # Steps run sequentially inside the job — each step must pass for the next to start
+    steps:
+
+      # Step 1 — download the repository code onto the virtual machine
+      - uses: actions/checkout@v4
+
+      # Step 2 — install Python using the version pinned in .python-version
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      # Step 3 — install pydoclint into the virtual machine's Python environment
+      - name: Install pydoclint
+        run: pip install "pydoclint>=0.8.4"
+
+      # Step 4 — run the docstring check; non-zero exit code fails the job
+      - name: Check docstrings
+        run: pydoclint --style=google drafts/test_connection.py

@@ -16,7 +16,8 @@ from datetime import date
 
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
-from ibapi.contract import Contract
+from ibapi.contract import Contract, ContractDetails  # ContractDetails: type hint for contractDetails parameter
+from ibapi.common import TickAttrib  # type hint for tickPrice _attrib parameter
 
 
 # ── TWS connection settings ───────────────────────────────────────────────────
@@ -76,7 +77,21 @@ IBKR_UNSET_THRESHOLD = 1e6
 
 
 def valid_greek(value: float | None) -> float | None:
-    """Return None if ibapi sent the 'not available' sentinel, otherwise the value."""
+    """Check if greek value is available.
+
+    ibapi Greek can be unavailable in three ways:
+        1. By passing None,
+        2. By passing NaN,
+        3. By passing large float value (abs > 1000000.0)
+
+    Args:
+        value (float | None): Raw Greek value received from ibapi,
+            to be validated.
+
+    Returns:
+        float | None: The value unchanged (if valid), or None (if not valid).
+    """
+
     if value is None:
         return None
     if value != value:              # NaN != NaN is the only case where this holds (IEEE 754)
@@ -87,7 +102,19 @@ def valid_greek(value: float | None) -> float | None:
 
 
 def expiry_to_date(expiry_str: str) -> date:
-    """Convert an IBKR expiry string (YYYYMMDD) to a Python date object."""
+    """Convert an IBKR expiry string (YYYYMMDD) to a Python date object.
+
+    Args:
+        expiry_str (str): Expiry string in YYYYMMDD format, e.g. "20260516".
+            Must be 8 characters with a numeric year, month, and day.
+
+    Returns:
+        date: Python date object representing the expiry date.
+
+    Raises:
+        ValueError: If the string is not in YYYYMMDD format, contains
+            non-numeric characters, or represents an invalid calendar date.
+    """
     try:
         expiry_year  = int(expiry_str[0:4])
         expiry_month = int(expiry_str[4:6])
@@ -98,7 +125,20 @@ def expiry_to_date(expiry_str: str) -> date:
 
 
 def find_closest_expiry(expirations: set[str], target_dte: int) -> str | None:
-    """Return the expiry (YYYYMMDD) whose DTE is closest to target_dte."""
+    """Find closest to the target expiry.
+
+    Expired entries (DTE < 0) are skipped
+    Malformed strings are skipped with a warning printed to stdout.
+
+    Args:
+        expirations (set[str]): Set of expiry strings in YYYYMMDD format
+            as returned by reqSecDefOptParams().
+        target_dte (int): Target number of days to expiry, e.g. 7.
+
+    Returns:
+        str | None: Expiry string closest to target_dte, or None if the
+            set is empty or all entries are already expired.
+    """
     today         = date.today()
     best_expiry   = None
     best_distance = float("inf")
@@ -125,7 +165,17 @@ def find_closest_expiry(expirations: set[str], target_dte: int) -> str | None:
 
 
 def find_closest_strike(strikes: set[float], und_price: float) -> float | None:
-    """Return the available strike closest to the underlying price."""
+    """Find the listed strike price closest to the underlying price (ATM).
+
+    Args:
+        strikes (set[float]): Set of available strike prices as returned
+            by reqSecDefOptParams().
+        und_price (float): Current underlying price used as the ATM reference.
+
+    Returns:
+        float | None: Strike price closest to und_price, or None if the
+            set is empty.
+    """
     best_strike   = None
     best_distance = float("inf")
 
@@ -139,7 +189,19 @@ def find_closest_strike(strikes: set[float], und_price: float) -> float | None:
 
 
 def print_data(symbol: str, expiry: str, strike: float, call_data: dict, put_data: dict):
-    """Print the latest call and put Greeks and prices."""
+    """Print the latest call and put Greeks and prices.
+
+    Called every 2 seconds from the main loop. Missing values (keys not
+    yet received from ibapi) display as 0.
+
+    Args:
+        symbol (str): Underlying ticker symbol, e.g. "IWM".
+        expiry (str): Option expiry string in YYYYMMDD format.
+        strike (float): Strike price of the subscribed contracts.
+        call_data (dict): Latest call fields keyed by name — bid, ask,
+            iv, delta, gamma, theta, vega. Missing keys display as 0.
+        put_data (dict): Latest put fields — same structure as call_data.
+    """
     print("\n--- {} {} strike {}  ({}) ---".format(
         symbol, expiry, strike, time.strftime("%H:%M:%S")
     ))
@@ -167,11 +229,37 @@ def print_data(symbol: str, expiry: str, strike: float, call_data: dict, put_dat
 # ── ibapi callbacks ───────────────────────────────────────────────────────────
 
 class TestConnection(EWrapper, EClient):
+    """ibapi wrapper and client combined — connects to TWS and collects option data.
+
+    Inherits EWrapper to receive callbacks
+    Inerhits EClient to send requests.
+    The same object plays both roles; EClient receives self as its wrapper.
+    All collected state is stored as plain instance attributes and read by main().
+
+    Attributes:
+        und_price (float | None): Last known underlying price, set by tickPrice().
+        und_ready (threading.Event): Set when the first valid underlying price arrives.
+        available_expirations (set[str]): Expiry strings from reqSecDefOptParams().
+        available_strikes (set[float]): Strike prices from reqSecDefOptParams().
+        params_ready (threading.Event): Set when option parameters are fully loaded.
+        call_data (dict): Latest ATM call data — bid, ask, iv, delta, gamma, theta, vega.
+        put_data (dict): Latest ATM put data — same structure as call_data.
+        connected (threading.Event): Set when TWS fires connectAck.
+        underlying_con_id (int | None): Internal IBKR contract ID, set by contractDetails().
+        contract_id_ready (threading.Event): Set when contractDetailsEnd fires.
+        INFO_CODES (range): ibapi status codes 2000-2999 — status notifications, not errors.
     """
-    Receives ibapi callbacks (EWrapper) and sends requests (EClient).
-    The same object plays both roles, so EClient receives 'self' as its wrapper.
-    All collected state is stored as plain attributes and read by main().
-    """
+
+    und_price:             float | None
+    und_ready:             threading.Event
+    available_expirations: set[str]
+    available_strikes:     set[float]
+    params_ready:          threading.Event
+    call_data:             dict
+    put_data:              dict
+    connected:             threading.Event
+    underlying_con_id:     int | None
+    contract_id_ready:     threading.Event
 
     def __init__(self):
         EWrapper.__init__(self)
@@ -202,14 +290,27 @@ class TestConnection(EWrapper, EClient):
     # ibapi's 2000-2999 range = status notifications (data farm connected, etc.)
     # using range() means any new 2xxx code ibapi adds is handled automatically.
     # subclass can override with a different range or a specific tuple if needed.
-    INFO_CODES = range(2000, 3000)
+    INFO_CODES: range = range(2000, 3000)
 
     # fired by ibapi once after connect() succeeds — confirms the session is live
     def connectAck(self):
+        """Confirm connection to TWS is established.
+
+        Fired by ibapi once after connect() succeeds. Sets the connected
+        event so the main thread can continue past its wait() call.
+        """
         self.connected.set()
 
-    # fired by ibapi after reqMarketDataType() to confirm which mode is now active
-    def marketDataType(self, _, market_data_type):
+    def marketDataType(self, _: int, market_data_type: int):
+        """Log the active market data mode after reqMarketDataType() is called.
+
+        Fired by ibapi to confirm the mode switch. Prints a human-readable
+        name for the active mode.
+
+        Args:
+            market_data_type (int): Active mode code — 1 live, 2 frozen,
+                3 delayed 15 min, 4 delayed frozen.
+        """
         names = {
             1: "live",
             2: "frozen (last values — used when market is closed)",
@@ -220,7 +321,26 @@ class TestConnection(EWrapper, EClient):
         print("Market data mode: {}".format(name))
 
     # fired by ibapi for every error AND every status notification — both come through here
-    def error(self, req_id, _error_time, error_code, error_string, _advanced_order_reject_desc=""):
+    def error(self, req_id: int, _error_time: str, error_code: int, error_string: str, _advanced_order_reject_desc: str = "") -> None:
+        """Handle errors and status notifications from TWS.
+
+        Fired by ibapi for both real errors and info-level status notifications.
+        INFO_CODES (2000-2999) are silently ignored. Real errors are printed
+        with a plain-English description where available, otherwise the raw
+        ibapi message is used.
+
+        Args:
+            req_id (int): ID of the request that caused the error, or -1
+                for connection-level errors not tied to a specific request.
+            _error_time (str): Timestamp of the error — not used by this
+                implementation.
+            error_code (int): ibapi error code. Codes in INFO_CODES are
+                status notifications, not real errors.
+            error_string (str): ibapi's default message. Used as fallback
+                when error_code is not in KNOWN_ERRORS.
+            _advanced_order_reject_desc (str): Order reject detail for
+                order errors — not used by this implementation.
+        """
         # silently ignore status notifications — they are not errors
         if error_code in self.INFO_CODES:
             return
@@ -231,7 +351,22 @@ class TestConnection(EWrapper, EClient):
     # ── underlying price (flow step 2) ───────────────────────────────────────
 
     # fired by ibapi for every price tick from reqMktData() — underlying, call, and put
-    def tickPrice(self, req_id, tick_type, price, _attrib):
+    def tickPrice(self, req_id: int, tick_type: int, price: float, _attrib: TickAttrib) -> None:
+        """Store incoming price ticks for the underlying, call, and put.
+
+        Fired by ibapi for every price update from reqMktData(). Routes
+        each tick to the correct data store based on req_id. Prices <= 0
+        are ignored — ibapi sends 0 when data is unavailable.
+
+        Args:
+            req_id (int): Identifies the subscription — REQ_UNDERLYING,
+                REQ_CALL, or REQ_PUT.
+            tick_type (int): Price category — 1 bid, 2 ask, 4 last traded,
+                9 close (used as underlying fallback when market is closed).
+            price (float): Tick value in USD. Ignored if <= 0.
+            _attrib (TickAttrib): Additional tick attributes — not used by
+                this implementation.
+        """
         if price <= 0:
             return
 
@@ -257,7 +392,18 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi for each result returned by reqContractDetails()
     # one call per matching contract — IBKR may return several for ambiguous symbols
-    def contractDetails(self, req_id, contract_details):
+    def contractDetails(self, req_id: int, contract_details: ContractDetails | None) -> None:
+        """Store the first valid IBKR contract ID returned by reqContractDetails().
+
+        Fired once per matching contract. Only the first result with a non-zero
+        conId is stored; subsequent results are ignored.
+
+        Args:
+            req_id (int): Identifies the request — only REQ_CONTRACT_DETAILS
+                is handled.
+            contract_details (ContractDetails | None): Contract data returned
+                by TWS. May be None or contain conId=0 for ambiguous contracts.
+        """
         if req_id != REQ_CONTRACT_DETAILS:
             return
         if self.underlying_con_id is not None:
@@ -277,7 +423,16 @@ class TestConnection(EWrapper, EClient):
         self.underlying_con_id = con_id
 
     # fired by ibapi once after all contractDetails() results have been delivered
-    def contractDetailsEnd(self, req_id):
+    def contractDetailsEnd(self, req_id: int) -> None:
+        """Signal that all contractDetails() results have been delivered.
+
+        Fired by ibapi once after the last contractDetails() call for a given
+        request. Sets contract_id_ready so the main thread can continue.
+
+        Args:
+            req_id (int): Identifies the completed request — only
+                REQ_CONTRACT_DETAILS is handled.
+        """
         if req_id == REQ_CONTRACT_DETAILS:
             self.contract_id_ready.set()
 
@@ -285,9 +440,29 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi once per exchange in response to reqSecDefOptParams()
     # delivers all available expirations and strikes for that exchange
-    def securityDefinitionOptionParameter(self, req_id, exchange,
-                                           _underlying_con_id, _trading_class,
-                                           _multiplier, expirations, strikes):
+    def securityDefinitionOptionParameter(self, req_id: int, exchange: str,
+                                           _underlying_con_id: int, _trading_class: str,
+                                           _multiplier: str, expirations: set[str],
+                                           strikes: set[float]) -> None:
+        """Accumulate available expirations and strikes from one exchange.
+
+        Fired by ibapi once per exchange in response to reqSecDefOptParams().
+        Only SMART exchange data is kept to avoid duplicates across venues.
+
+        Args:
+            req_id (int): Identifies the request — only REQ_OPT_PARAMS
+                is handled.
+            exchange (str): Exchange name, e.g. "SMART", "CBOE", "AMEX".
+                Only "SMART" data is stored.
+            _underlying_con_id (int): Underlying contract ID echoed back
+                by ibapi — not used by this implementation.
+            _trading_class (str): Option trading class — not used by this
+                implementation.
+            _multiplier (str): Contract multiplier — not used by this
+                implementation.
+            expirations (set[str]): Available expiry dates in YYYYMMDD format.
+            strikes (set[float]): Available strike prices in USD.
+        """
         if req_id != REQ_OPT_PARAMS:
             return
         print("DEBUG params — exchange: {}  expirations: {}  strikes: {}".format(
@@ -300,7 +475,17 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi once after all securityDefinitionOptionParameter() calls are done
     # only now is it safe to read available_expirations and available_strikes
-    def securityDefinitionOptionParameterEnd(self, req_id):
+    def securityDefinitionOptionParameterEnd(self, req_id: int) -> None:
+        """Signal that all securityDefinitionOptionParameter() calls are done.
+
+        Fired by ibapi once after the last exchange result has been delivered.
+        Only after tt is safe to raed available_expirations and
+        available_strikes. Sets params_ready so the main thread can continue.
+
+        Args:
+            req_id (int): Identifies the completed request — only
+                REQ_OPT_PARAMS is handled.
+        """
         if req_id != REQ_OPT_PARAMS:
             return
         print("DEBUG params end — total expirations: {}  total strikes: {}".format(
@@ -311,9 +496,34 @@ class TestConnection(EWrapper, EClient):
     # ── option Greeks (flow step 6) ───────────────────────────────────────────
 
     # fired by ibapi for every Greeks tick from reqMktData() on an option contract
-    def tickOptionComputation(self, req_id, tick_type, _tick_attrib,
-                              implied_vol, delta, _opt_price, _pv_dividend,
-                              gamma, vega, theta, _und_price):
+    def tickOptionComputation(self, req_id: int, tick_type: int, _tick_attrib: int,
+                              implied_vol: float, delta: float, _opt_price: float,
+                              _pv_dividend: float, gamma: float, vega: float,
+                              theta: float, _und_price: float) -> None:
+        """Store incoming Greeks for the ATM call and put.
+
+        Fired by ibapi for every Greeks tick from reqMktData() on an option.
+        Only tick_type 13 (model price) is stored — it is the most reliable
+        source. Each value is validated through valid_greek() before storing.
+
+        Args:
+            req_id (int): Identifies the subscription — REQ_CALL or REQ_PUT.
+            tick_type (int): Greeks calculation basis — only 13 (model price)
+                is processed; all other tick types are ignored.
+            _tick_attrib (int): Additional tick attributes — not used by this
+                implementation.
+            implied_vol (float): Implied volatility. Stored as "iv".
+            delta (float): Option delta — sensitivity to underlying price.
+            _opt_price (float): Model option price — not used by this
+                implementation.
+            _pv_dividend (float): Present value of dividends — not used by
+                this implementation.
+            gamma (float): Option gamma — rate of change of delta.
+            vega (float): Option vega — sensitivity to implied volatility.
+            theta (float): Option theta — daily time decay.
+            _und_price (float): Underlying price at computation time — not
+                used by this implementation.
+        """
         # tick type 13 = model price — most reliable source for Greeks
         if tick_type != 13:
             return
@@ -336,6 +546,12 @@ class TestConnection(EWrapper, EClient):
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Connect to TWS, subscribe to the ATM option near TARGET_DTE, and stream Greeks.
+
+    Runs the full flow sequentially: connect → get underlying price →
+    resolve contract ID → fetch option chain → subscribe → print loop.
+    Disconnects cleanly on Ctrl+C or any early exit.
+    """
     app = TestConnection()
 
     try:
