@@ -16,7 +16,7 @@ from datetime import date
 
 from ibapi.client import EClient
 from ibapi.common import TickAttrib  # type hint for tickPrice _attrib parameter
-from ibapi.contract import Contract
+from ibapi.contract import Contract, ContractDetails  # type hint for contractDetails callback
 from ibapi.wrapper import EWrapper
 
 # ── TWS connection settings ───────────────────────────────────────────────────
@@ -398,7 +398,7 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi for each result returned by reqContractDetails()
     # one call per matching contract — IBKR may return several for ambiguous symbols
-    def contractDetails(self, req_id, contract_details):
+    def contractDetails(self, req_id: int, contract_details: ContractDetails | None) -> None:
         """Store the first valid IBKR contract ID returned by reqContractDetails().
 
         Fired once per matching contract. Only the first result with a non-zero
@@ -429,7 +429,7 @@ class TestConnection(EWrapper, EClient):
         self.underlying_con_id = con_id
 
     # fired by ibapi once after all contractDetails() results have been delivered
-    def contractDetailsEnd(self, req_id):
+    def contractDetailsEnd(self, req_id: int) -> None:
         """Signal that all contractDetails() results have been delivered.
 
         Fired by ibapi once after the last contractDetails() call for a given
@@ -446,9 +446,10 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi once per exchange in response to reqSecDefOptParams()
     # delivers all available expirations and strikes for that exchange
-    def securityDefinitionOptionParameter(self, req_id, exchange,
-                                           _underlying_con_id, _trading_class,
-                                           _multiplier, expirations, strikes):
+    def securityDefinitionOptionParameter(self, req_id: int, exchange: str,
+                                           _underlying_con_id: int, _trading_class: str,
+                                           _multiplier: str,
+                                           expirations: set[str], strikes: set[float]) -> None:
         """Accumulate available expirations and strikes from one exchange.
 
         Fired by ibapi once per exchange in response to reqSecDefOptParams().
@@ -479,7 +480,7 @@ class TestConnection(EWrapper, EClient):
 
     # fired by ibapi once after all securityDefinitionOptionParameter() calls are done
     # only now is it safe to read available_expirations and available_strikes
-    def securityDefinitionOptionParameterEnd(self, req_id):
+    def securityDefinitionOptionParameterEnd(self, req_id: int) -> None:
         """Signal that all securityDefinitionOptionParameter() calls are done.
 
         Fired by ibapi once after the last exchange result has been delivered.
@@ -499,9 +500,10 @@ class TestConnection(EWrapper, EClient):
     # ── option Greeks (flow step 6) ───────────────────────────────────────────
 
     # fired by ibapi for every Greeks tick from reqMktData() on an option contract
-    def tickOptionComputation(self, req_id, tick_type, _tick_attrib,
-                              implied_vol, delta, _opt_price, _pv_dividend,
-                              gamma, vega, theta, _und_price):
+    def tickOptionComputation(self, req_id: int, tick_type: int, _tick_attrib: int,
+                              implied_vol: float, delta: float, _opt_price: float,
+                              _pv_dividend: float, gamma: float, vega: float,
+                              theta: float, _und_price: float) -> None:
         """Store incoming Greeks for the ATM call and put.
 
         Fired by ibapi for every Greeks tick from reqMktData() on an option.
