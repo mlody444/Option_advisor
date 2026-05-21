@@ -20,4 +20,22 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pydoclint>=0.8.4",
+    "ruff>=0.15.13",
+]
+
+# ── ruff ─────────────────────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors  — style violations
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes             — undefined names, unused imports
+    "I",    # isort               — import ordering
+    "B",    # bugbear             — common bugs and design issues
+    "UP",   # pyupgrade           — modernise Python syntax
+    "SIM",  # simplify            — simplifiable code patterns
+    "RUF",  # ruff-specific rules
 ]
