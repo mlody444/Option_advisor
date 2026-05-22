@@ -241,11 +241,12 @@ class TestConnection(EWrapper, EClient):
     """ibapi wrapper and client combined — connects to TWS and collects option data.
 
     Inherits EWrapper to receive callbacks
-    Inerhits EClient to send requests.
+    Inherits EClient to send requests.
     The same object plays both roles; EClient receives self as its wrapper.
     All collected state is stored as plain instance attributes and read by main().
 
     Attributes:
+        INFO_CODES (range): ibapi status codes 2000-2999 — status notifications, not errors.
         und_price (float | None): Last known underlying price, set by tickPrice().
         und_ready (threading.Event): Set when the first valid underlying price arrives.
         available_expirations (set[str]): Expiry strings from reqSecDefOptParams().
@@ -257,8 +258,12 @@ class TestConnection(EWrapper, EClient):
         connected (threading.Event): Set when TWS fires connectAck.
         underlying_con_id (int | None): Internal IBKR contract ID, set by contractDetails().
         contract_id_ready (threading.Event): Set when contractDetailsEnd fires.
-        INFO_CODES (range): ibapi status codes 2000-2999 — status notifications, not errors.
     """
+
+    # ibapi's 2000-2999 range = status notifications (data farm connected, etc.)
+    # using range() means any new 2xxx code ibapi adds is handled automatically.
+    # subclass can override with a different range or a specific tuple if needed.
+    INFO_CODES: range = range(2000, 3000)
 
     und_price: float | None
     und_ready: threading.Event
@@ -291,16 +296,11 @@ class TestConnection(EWrapper, EClient):
         # set when TWS confirms the connection is established
         self.connected = threading.Event()
 
-        # IWM's internal IBKR contract ID — needed for reqSecDefOptParams
+        # underlying's internal IBKR contract ID — needed for reqSecDefOptParams
         self.underlying_con_id = None
         self.contract_id_ready = threading.Event()
 
     # ── connection (flow step 1) ──────────────────────────────────────────────
-
-    # ibapi's 2000-2999 range = status notifications (data farm connected, etc.)
-    # using range() means any new 2xxx code ibapi adds is handled automatically.
-    # subclass can override with a different range or a specific tuple if needed.
-    INFO_CODES: range = range(2000, 3000)
 
     # fired by ibapi once after connect() succeeds — confirms the session is live
     def connectAck(self) -> None:
@@ -398,17 +398,17 @@ class TestConnection(EWrapper, EClient):
         elif req_id == REQ_CALL:
             if tick_type == 1:
                 self.call_data["bid"] = price
-            if tick_type == 2:
+            elif tick_type == 2:
                 self.call_data["ask"] = price
-            if tick_type == 4:
+            elif tick_type == 4:
                 self.call_data["last"] = price
 
         elif req_id == REQ_PUT:
             if tick_type == 1:
                 self.put_data["bid"] = price
-            if tick_type == 2:
+            elif tick_type == 2:
                 self.put_data["ask"] = price
-            if tick_type == 4:
+            elif tick_type == 4:
                 self.put_data["last"] = price
 
     # ── contract ID (flow step 3) ─────────────────────────────────────────────
@@ -509,7 +509,7 @@ class TestConnection(EWrapper, EClient):
         """Signal that all securityDefinitionOptionParameter() calls are done.
 
         Fired by ibapi once after the last exchange result has been delivered.
-        Only after tt is safe to raed available_expirations and
+        Only after it is safe to read available_expirations and
         available_strikes. Sets params_ready so the main thread can continue.
 
         Args:
@@ -670,9 +670,10 @@ def main() -> None:
             return
 
         # flow step 5 — pick the closest expiry to TARGET_DTE and the ATM strike
-        expiry = find_closest_expiry(app.available_expirations, TARGET_DTE)
         if app.und_price is None:
-            return  # should not happen — guaranteed by und_ready.wait() above
+            print("Underlying price is not set — this should not happen")
+            return
+        expiry = find_closest_expiry(app.available_expirations, TARGET_DTE)
         strike = find_closest_strike(app.available_strikes, app.und_price)
 
         if expiry is None:
