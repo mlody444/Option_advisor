@@ -19,9 +19,29 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "bandit>=1.9.4",
+    "mypy>=2.1.0",
+    "pip-audit>=2.10.0",
     "pydoclint>=0.8.4",
     "ruff>=0.15.13",
 ]
+
+# ── setuptools ───────────────────────────────────────────────────────────────
+
+[tool.setuptools.packages.find]
+exclude = ["drafts*"]  # drafts/ contains exploratory scripts, not distributable packages
+
+# ── mypy ─────────────────────────────────────────────────────────────────────
+
+[tool.mypy]
+python_version        = "3.11"
+strict                = true
+disallow_subclassing_any = false  # ibapi ships no stubs — EWrapper/EClient are typed as Any
+
+[[tool.mypy.overrides]]
+# ibapi ships no type stubs — ignore all missing-import errors for it
+module                = "ibapi.*"
+ignore_missing_imports = true
 
 # ── ruff ─────────────────────────────────────────────────────────────────────
 

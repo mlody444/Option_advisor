@@ -1,5 +1,5 @@
 # Workflow name — displayed in the GitHub Actions tab
-name: Ruff
+name: Type check
 
 # When to run this workflow
 on:
@@ -12,7 +12,7 @@ on:
 jobs:
 
   # Job name — shown in GitHub UI and used in branch protection rules
-  ruff:
+  mypy:
 
     # GitHub provides a fresh Ubuntu Linux virtual machine for each run
     runs-on: ubuntu-latest
@@ -28,14 +28,10 @@ jobs:
         with:
           python-version-file: .python-version
 
-      # Step 3 — install ruff into the virtual machine's Python environment
-      - name: Install ruff
-        run: pip install "ruff>=0.15.13"
+      # Step 3 — install mypy into the virtual machine's Python environment
+      - name: Install mypy
+        run: pip install "mypy>=1.0"
 
-      # Step 4 — run the linter; non-zero exit code fails the job
-      - name: Check code style
-        run: ruff check drafts/test_connection.py
-
-      # Step 5 — verify formatting; non-zero exit code fails the job
-      - name: Check formatting
-        run: ruff format --check drafts/test_connection.py
+      # Step 4 — run the type checker; non-zero exit code fails the job
+      - name: Check types
+        run: mypy drafts/test_connection.py
