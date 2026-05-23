@@ -79,7 +79,7 @@ def _expiry_to_readable(expiry: str) -> str:
     return "{}-{}-{}".format(expiry[0:4], expiry[4:6], expiry[6:8])
 
 
-def _side_to_dict(side: OptionSide, prefix: str) -> dict:
+def _side_to_dict(side: OptionSide, prefix: str) -> dict:  # TODO: ruff format — column-aligned assignments inside will be reformatted
     """
     Convert one option side to a flat dictionary.
     prefix is either 'call_' or 'put_'.

@@ -11,5 +11,8 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
+# VS Code Code Runner artifact
+tempCodeRunnerFile.py
+
 # pyenv — .python-version is committed intentionally (pins the dev Python version)
 # .python-version
