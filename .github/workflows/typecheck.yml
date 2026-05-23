@@ -5,7 +5,7 @@ name: Type check
 on:
   pull_request:         # run on every pull request (any branch → any branch)
   push:
-    branches: [main]    # also run when code is pushed directly to main
+    branches: [master]  # also run when code is pushed directly to master
 
 # Jobs are independent units of work that run on separate virtual machines.
 # Multiple jobs run in parallel by default; steps within a job run sequentially.
@@ -28,9 +28,16 @@ jobs:
         with:
           python-version-file: .python-version
 
-      # Step 3 — install mypy into the virtual machine's Python environment
+      # Step 3 — install mypy (version read from pyproject.toml — single source of truth)
       - name: Install mypy
-        run: pip install "mypy>=1.0"
+        run: |
+          python - <<'EOF'
+          import tomllib, subprocess, sys
+          with open("pyproject.toml", "rb") as f:
+              dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
+          pkg = next(d for d in dev if d.startswith("mypy"))
+          subprocess.run([sys.executable, "-m", "pip", "install", pkg], check=True)
+          EOF
 
       # Step 4 — run the type checker; non-zero exit code fails the job
       - name: Check types

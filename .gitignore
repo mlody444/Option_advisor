@@ -7,5 +7,9 @@ venv/
 __pycache__/
 *.py[cod]
 
+# tool caches
+.ruff_cache/
+.mypy_cache/
+
 # pyenv — .python-version is committed intentionally (pins the dev Python version)
 # .python-version

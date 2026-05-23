@@ -5,7 +5,7 @@ name: Ruff
 on:
   pull_request:         # run on every pull request (any branch → any branch)
   push:
-    branches: [main]    # also run when code is pushed directly to main
+    branches: [master]  # also run when code is pushed directly to master
 
 # Jobs are independent units of work that run on separate virtual machines.
 # Multiple jobs run in parallel by default; steps within a job run sequentially.
@@ -28,9 +28,16 @@ jobs:
         with:
           python-version-file: .python-version
 
-      # Step 3 — install ruff into the virtual machine's Python environment
+      # Step 3 — install ruff (version read from pyproject.toml — single source of truth)
       - name: Install ruff
-        run: pip install "ruff>=0.15.13"
+        run: |
+          python - <<'EOF'
+          import tomllib, subprocess, sys
+          with open("pyproject.toml", "rb") as f:
+              dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
+          pkg = next(d for d in dev if d.startswith("ruff"))
+          subprocess.run([sys.executable, "-m", "pip", "install", pkg], check=True)
+          EOF
 
       # Step 4 — run the linter; non-zero exit code fails the job
       - name: Check code style
