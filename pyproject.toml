@@ -43,6 +43,11 @@ disallow_subclassing_any = false  # ibapi ships no stubs — EWrapper/EClient ar
 module                = "ibapi.*"
 ignore_missing_imports = true
 
+# ── pydoclint ────────────────────────────────────────────────────────────────
+
+[tool.pydoclint]
+style = "google"
+
 # ── ruff ─────────────────────────────────────────────────────────────────────
 
 [tool.ruff]

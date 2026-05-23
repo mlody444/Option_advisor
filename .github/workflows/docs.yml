@@ -41,4 +41,4 @@ jobs:
 
       # Step 4 — run the docstring check; non-zero exit code fails the job
       - name: Check docstrings
-        run: pydoclint --style=google drafts/test_connection.py
+        run: pydoclint drafts/test_connection.py
