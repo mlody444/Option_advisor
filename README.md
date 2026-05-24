@@ -8,7 +8,7 @@ days-to-expiry.
 
 ## Requirements
 
-- Python 3.11
+- Python 3.11.9 (pinned via `.python-version`)
 - Interactive Brokers TWS or IB Gateway running locally with API enabled
   (`Edit → Global Configuration → API → Settings → Enable ActiveX and Socket Clients`)
 
@@ -21,6 +21,8 @@ python -m venv env
 source env/bin/activate       # macOS / Linux
 
 # install project dependencies
+# note: ibapi is not on PyPI — install it manually first (see ibapi docs),
+#       then install the remaining project dependencies:
 pip install .
 ```
 
@@ -30,24 +32,32 @@ pip install .
 # install the project together with all dev tools (linter, type checker, etc.)
 pip install ".[dev]"
 
-# run all checks
-ruff check drafts/test_connection.py            # lint
-ruff format --check drafts/test_connection.py   # formatting
-mypy drafts/test_connection.py                  # type check
-pydoclint --style=google drafts/test_connection.py  # docstrings
-bandit -r drafts/test_connection.py             # security scan
-pip-audit                                       # dependency CVEs
+# run all checks at once (Windows PowerShell)
+.\drafts\check_all.ps1
+
+# or run individual checks
+.\drafts\check_lint.ps1       # ruff lint
+.\drafts\check_format.ps1     # ruff formatting
+.\drafts\check_types.ps1      # mypy type check
+.\drafts\check_docs.ps1       # pydoclint docstrings
+.\drafts\check_security.ps1   # bandit + pip-audit
 ```
 
 ## CI
 
-All checks above run automatically on every pull request and push to `main`.
+All checks above run automatically on every pull request and push to `master`.
 
 ## Project structure
 
 ```
-drafts/               # exploratory scripts — not part of the main program
-  test_connection.py  # verifies TWS connectivity and basic data flow
+drafts/                  # exploratory scripts — not part of the main program
+  test_connection.py     # verifies TWS connectivity and basic data flow
+  check_all.ps1          # run all checks in sequence and print a summary
+  check_lint.ps1         # ruff lint
+  check_format.ps1       # ruff format --check
+  check_types.ps1        # mypy type check
+  check_docs.ps1         # pydoclint docstring check
+  check_security.ps1     # bandit security scan + pip-audit CVE check
 ```
 
 The main program will be added in a separate module as the project grows.

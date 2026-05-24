@@ -6,7 +6,7 @@ The user currently analyzes options by hand and wants tooling to automate/assist
 
 ## Technology Decisions
 - **Broker API:** `ibapi` (official IBKR library) — chosen for full control over `ib_insync`
-- **UI:** Start simple (CLI / `tkinter`), expand later
+- **UI:** PyQt6 + pyqtgraph — charts and option chain display
 - **Data:** Live Greeks and options chains straight from IBKR TWS/Gateway
 
 ## Architecture (4 layers)

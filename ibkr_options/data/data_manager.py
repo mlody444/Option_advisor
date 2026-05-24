@@ -8,7 +8,7 @@ class DataManager:
     def __init__(self, data_queue: queue.Queue):
         self._queue = data_queue
         # keyed by (strike, expiry)
-        self._chain: dict[tuple, StrikeSlice] = {}
+        self._chain: dict[tuple, StrikeSlice] = {}  # TODO: parameterise tuple → tuple[float, str]
 
     def process_pending(self):
         """Drain the queue and apply updates. Call this from the UI timer."""

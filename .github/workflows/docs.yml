@@ -5,7 +5,12 @@ name: Documentation
 on:
   pull_request:         # run on every pull request (any branch → any branch)
   push:
-    branches: [main]    # also run when code is pushed directly to main
+    branches: [master]  # also run when code is pushed directly to master
+
+# Cancel any in-flight run for the same workflow + branch when a new commit arrives
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Jobs are independent units of work that run on separate virtual machines.
 # Multiple jobs run in parallel by default; steps within a job run sequentially.
@@ -24,14 +29,24 @@ jobs:
       - uses: actions/checkout@v4
 
       # Step 2 — install Python using the version pinned in .python-version
+      #           cache: 'pip' reuses downloaded packages across runs — only re-downloads
+      #           when pyproject.toml changes (new package or version bump)
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
 
-      # Step 3 — install pydoclint into the virtual machine's Python environment
-      - name: Install pydoclint
-        run: pip install "pydoclint>=0.8.4"
+      # Step 3 — install all dev dependencies (versions from pyproject.toml — single source of truth)
+      - name: Install dev dependencies
+        run: |
+          python - <<'EOF'
+          import tomllib, subprocess, sys
+          with open("pyproject.toml", "rb") as f:
+              dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
+          subprocess.run([sys.executable, "-m", "pip", "install"] + dev, check=True)
+          EOF
 
       # Step 4 — run the docstring check; non-zero exit code fails the job
       - name: Check docstrings
-        run: pydoclint --style=google drafts/test_connection.py
+        run: pydoclint drafts/test_connection.py

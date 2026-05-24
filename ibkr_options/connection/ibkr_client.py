@@ -7,6 +7,8 @@ class IBKRClient(EWrapper, EClient):
     No other module imports from ibapi directly.
     """
 
+    # TODO: add type hints to all methods (no -> None, no parameter types)
+
     def __init__(self, data_queue):
         EWrapper.__init__(self)
         EClient.__init__(self, self)
@@ -22,6 +24,10 @@ class IBKRClient(EWrapper, EClient):
 
     # ── EWrapper callbacks ────────────────────────────────────────────────────
 
+    # TODO: wrong signature — ibapi 10.30+ inserts error_time as 2nd parameter.
+    #       correct order: (self, req_id, error_time, error_code, error_string,
+    #                       advanced_order_reject_desc)
+    #       see drafts/test_connection.py error() for reference
     def error(self, req_id, error_code, error_string, advanced_order_reject_desc=""):
         pass  # TODO: log and route to reconnect logic if needed
 
@@ -30,6 +36,8 @@ class IBKRClient(EWrapper, EClient):
                               gamma, vega, theta, und_price):
         pass  # TODO: package Greeks and push to self._queue
 
+    # TODO: wrong callback name — ibapi calls securityDefinitionOptionParameter (no "al")
+    #       this override is never invoked; option params will silently never arrive
     def securityDefinitionOptionalParameter(self, req_id, exchange,
                                             underlying_con_id, trading_class,
                                             multiplier, expirations, strikes):
