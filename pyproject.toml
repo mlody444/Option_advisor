@@ -8,7 +8,7 @@ version         = "0.1.0"
 description     = "IBKR options data collector and analyzer"
 readme          = "README.md"
 requires-python = "==3.11.*"
-authors         = [{ email = "mlody240@gmail.com" }]
+authors         = [{ name = "mlody444", email = "mlody240@gmail.com" }]
 
 dependencies = [
     "ibapi==10.37.2",

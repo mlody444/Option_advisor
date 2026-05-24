@@ -8,7 +8,7 @@ days-to-expiry.
 
 ## Requirements
 
-- Python 3.11
+- Python 3.11.9 (pinned via `.python-version`)
 - Interactive Brokers TWS or IB Gateway running locally with API enabled
   (`Edit → Global Configuration → API → Settings → Enable ActiveX and Socket Clients`)
 

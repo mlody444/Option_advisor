@@ -7,6 +7,11 @@ on:
   push:
     branches: [master]  # also run when code is pushed directly to master
 
+# Cancel any in-flight run for the same workflow + branch when a new commit arrives
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Jobs are independent units of work that run on separate virtual machines.
 # Multiple jobs run in parallel by default; steps within a job run sequentially.
 jobs:
@@ -24,19 +29,22 @@ jobs:
       - uses: actions/checkout@v4
 
       # Step 2 — install Python using the version pinned in .python-version
+      #           cache: 'pip' reuses downloaded packages across runs — only re-downloads
+      #           when pyproject.toml changes (new package or version bump)
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
 
-      # Step 3 — install bandit (version read from pyproject.toml — single source of truth)
-      - name: Install bandit
+      # Step 3 — install all dev dependencies (versions from pyproject.toml — single source of truth)
+      - name: Install dev dependencies
         run: |
           python - <<'EOF'
           import tomllib, subprocess, sys
           with open("pyproject.toml", "rb") as f:
               dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
-          pkg = next(d for d in dev if d.startswith("bandit"))
-          subprocess.run([sys.executable, "-m", "pip", "install", pkg], check=True)
+          subprocess.run([sys.executable, "-m", "pip", "install"] + dev, check=True)
           EOF
 
       # Step 4 — scan for security issues; non-zero exit code fails the job
@@ -53,37 +61,30 @@ jobs:
       - uses: actions/checkout@v4
 
       # Step 2 — install Python using the version pinned in .python-version
+      #           cache: 'pip' reuses downloaded packages across runs — only re-downloads
+      #           when pyproject.toml changes (new package or version bump)
       - uses: actions/setup-python@v5
         with:
           python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
 
-      # Step 3 — install PyPI-available project dependencies and pip-audit
+      # Step 3 — install PyPI-available project dependencies and all dev tools
       #
-      #   Why not "pip install ."?
+      #   Why not "pip install .[dev]"?
       #     pyproject.toml lists ibapi as a dependency, but ibapi is not published on PyPI —
       #     it is distributed by Interactive Brokers as a direct download. pip install . would
-      #     fail trying to resolve ibapi from PyPI.
-      #
-      #   How versions stay in sync:
-      #     The inline Python script reads [project.dependencies] directly from pyproject.toml
-      #     using tomllib (Python 3.11 stdlib). ibapi is filtered out by name. All other
-      #     packages are installed with the exact version pins from pyproject.toml, so there
-      #     is no duplication — updating a version in pyproject.toml is the only change needed.
+      #     fail trying to resolve ibapi from PyPI. ibapi is filtered out by name; all other
+      #     packages use the exact version pins from pyproject.toml — single source of truth.
       - name: Install dependencies
         run: |
           python - <<'EOF'
           import tomllib, subprocess, sys
           with open("pyproject.toml", "rb") as f:
-              deps = tomllib.load(f)["project"]["dependencies"]
-          pkgs = [d for d in deps if not d.startswith("ibapi")]
-          subprocess.run([sys.executable, "-m", "pip", "install"] + pkgs, check=True)
-          EOF
-          python - <<'EOF'
-          import tomllib, subprocess, sys
-          with open("pyproject.toml", "rb") as f:
-              dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
-          pkg = next(d for d in dev if d.startswith("pip-audit"))
-          subprocess.run([sys.executable, "-m", "pip", "install", pkg], check=True)
+              data = tomllib.load(f)
+              deps = [d for d in data["project"]["dependencies"] if not d.startswith("ibapi")]
+              dev = data["project"]["optional-dependencies"]["dev"]
+          subprocess.run([sys.executable, "-m", "pip", "install"] + deps + dev, check=True)
           EOF
 
       # Step 4 — check every installed package against the OSV vulnerability database
