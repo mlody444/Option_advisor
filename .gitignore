@@ -7,6 +7,11 @@ venv/
 __pycache__/
 *.py[cod]
 
+# build artifacts
+dist/
+build/
+*.egg-info/
+
 # tool caches
 .ruff_cache/
 .mypy_cache/

@@ -23,6 +23,9 @@ dev = [
     "mypy>=2.1.0",
     "pip-audit>=2.10.0",
     "pydoclint>=0.8.4",
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "pytest-mock>=3.14",
     "ruff>=0.15.13",
     "setuptools>=78.1.1",
 ]
@@ -30,7 +33,7 @@ dev = [
 # ── setuptools ───────────────────────────────────────────────────────────────
 
 [tool.setuptools.packages.find]
-exclude = ["drafts*"]  # drafts/ contains exploratory scripts, not distributable packages
+exclude = ["drafts*", "tests*"]  # not distributable — drafts/ is exploratory scripts, tests/ is test suite
 
 # ── mypy ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +51,15 @@ ignore_missing_imports = true
 
 [tool.pydoclint]
 style = "google"
+
+# ── pytest ───────────────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+markers   = [
+    "live: requires a live TWS connection — skipped in CI",
+]
 
 # ── ruff ─────────────────────────────────────────────────────────────────────
 
