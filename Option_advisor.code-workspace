@@ -6,6 +6,11 @@
 	],
 	"settings": {
 		"autoDocstring.docstringFormat": "google",
-		"autoDocstring.guessTypes": true
+		"autoDocstring.guessTypes": true,
+		"editor.minimap.enabled": false,
+		"editor.rulers": [
+			{ "column": 100, "color": "#5a5a5a" },
+            { "column": 95,  "color": "#3a3b3c" },
+		]
 	}
 }
