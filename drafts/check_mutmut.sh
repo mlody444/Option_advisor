@@ -32,8 +32,7 @@ source "$VENV/bin/activate"
 set +e
 rm -rf mutants .mutmut-cache  # mutmut v2 caches by source only — stale on test changes
 python -m mutmut run
-MUTMUT_EXIT=$?
-set -e
+# do NOT re-enable set -e here — the reporting block below must capture its own exit code
 
 python - <<'PYEOF'
 import subprocess, re, ast
@@ -145,6 +144,10 @@ if all_counts:
     for fn, n in sorted(all_counts.items(), key=lambda x: -x[1]):
         print(f"  {fn:<30} {n} issue{'s' if n != 1 else ''}")
     print("=" * 60)
-PYEOF
 
-exit $MUTMUT_EXIT
+import sys
+sys.exit(1 if (survived or suspicious) else 0)
+PYEOF
+REPORT_EXIT=$?
+
+exit $REPORT_EXIT

@@ -24,7 +24,7 @@ dev = [
     "pip-audit>=2.10.0",
     "pydoclint>=0.8.4",
     "hypothesis>=6.0",
-    "mutmut<3",
+    "mutmut<3",  # v3 has WSL compatibility issues — stay on v2
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "pytest-mock>=3.14",
@@ -64,6 +64,8 @@ markers   = [
 ]
 
 # ── mutmut ───────────────────────────────────────────────────────────────────
+# Pinned to v2 (<3): v3 introduced WSL compatibility issues in this project.
+# v3 would have allowed --workers for parallel mutant execution.
 
 [tool.mutmut]
 paths_to_mutate = "drafts/ibkr_utils.py"

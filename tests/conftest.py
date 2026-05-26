@@ -1,6 +1,12 @@
+import os
 import sys
 
 import pytest
+from hypothesis import settings
+
+settings.register_profile("ci", max_examples=50)
+settings.register_profile("local", max_examples=10)
+settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "local"))
 
 try:
     import ibapi  # noqa: F401

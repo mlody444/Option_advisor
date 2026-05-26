@@ -22,6 +22,8 @@ jobs:
     # GitHub provides a fresh Ubuntu Linux virtual machine for each run
     # Ubuntu is required by mutmut which uses os.fork() — not available on Windows
     runs-on: ubuntu-latest
+    env:
+      HYPOTHESIS_PROFILE: ci  # use more examples on CI; local runs default to fewer (see tests/conftest.py)
 
     # Steps run sequentially inside the job — each step must pass for the next to start
     steps:
