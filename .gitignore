@@ -2,6 +2,7 @@
 env/
 venv/
 .venv/
+.venv-wsl/
 
 # Python cache
 __pycache__/
@@ -15,6 +16,8 @@ build/
 # tool caches
 .ruff_cache/
 .mypy_cache/
+.mutmut-cache
+mutants/
 
 # VS Code Code Runner artifact
 tempCodeRunnerFile.py
