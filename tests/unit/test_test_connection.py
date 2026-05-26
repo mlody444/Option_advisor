@@ -26,3 +26,7 @@ class TestValidGreek:
     @given(st.floats(allow_nan=False).filter(lambda x: abs(x) > 1e6))
     def test_value_exceeding_threshold_returns_none(self, value: float) -> None:
         assert valid_greek(value) is None
+
+    @given(st.floats(min_value=1e6, max_value=2e6, allow_nan=False).filter(lambda x: abs(x) > 1e6))
+    def test_value_just_above_threshold_returns_none(self, value: float) -> None:
+        assert valid_greek(value) is None

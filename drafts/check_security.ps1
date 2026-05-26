@@ -6,7 +6,9 @@ else { Write-Host "FAILED" -ForegroundColor Red }
 
 Write-Host ""
 Write-Host "--- Pip-audit (dependency CVEs) ---" -ForegroundColor Cyan
-pip-audit
+pip-audit `
+    --ignore-vuln CVE-2025-4565 `
+    --ignore-vuln CVE-2026-0994  # ibapi==10.37.2 hard-pins protobuf==5.29.3; cannot upgrade
 $audit_exit = $LASTEXITCODE
 if ($audit_exit -eq 0) { Write-Host "PASSED" -ForegroundColor Green }
 else { Write-Host "FAILED" -ForegroundColor Red }
