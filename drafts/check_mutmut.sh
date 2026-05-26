@@ -30,6 +30,7 @@ EOF
 
 source "$VENV/bin/activate"
 set +e
+rm -rf mutants .mutmut-cache  # mutmut v2 caches by source only — stale on test changes
 python -m mutmut run
 MUTMUT_EXIT=$?
 set -e

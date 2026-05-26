@@ -68,7 +68,7 @@ markers   = [
 [tool.mutmut]
 paths_to_mutate = "drafts/ibkr_utils.py"
 tests_dir = "tests/unit/"
-runner = "pytest"
+runner = "pytest -x"
 
 # ── ruff ─────────────────────────────────────────────────────────────────────
 
