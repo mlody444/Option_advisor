@@ -19,6 +19,10 @@ build/
 .mutmut-cache
 mutants/
 
+# coverage artefacts
+.coverage
+htmlcov/
+
 # VS Code Code Runner artifact
 tempCodeRunnerFile.py
 

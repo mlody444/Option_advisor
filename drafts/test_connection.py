@@ -10,6 +10,7 @@ What it does:
   6. Prints the latest Greeks + prices every 2 seconds
 """
 
+import logging
 import threading
 import time
 from datetime import date
@@ -26,6 +27,8 @@ from drafts.ibkr_utils import (
     print_data,
     valid_greek,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── TWS connection settings ───────────────────────────────────────────────────
 HOST = "127.0.0.1"
@@ -121,6 +124,7 @@ class TestConnection(EWrapper, EClient):
     connected: threading.Event
     underlying_con_id: int | None
     contract_id_ready: threading.Event
+    _contract_details_done: bool
 
     def __init__(self) -> None:
         EWrapper.__init__(self)
@@ -145,6 +149,7 @@ class TestConnection(EWrapper, EClient):
         # underlying's internal IBKR contract ID — needed for reqSecDefOptParams
         self.underlying_con_id = None
         self.contract_id_ready = threading.Event()
+        self._contract_details_done = False
 
     # ── connection (flow step 1) ──────────────────────────────────────────────
 
@@ -234,7 +239,7 @@ class TestConnection(EWrapper, EClient):
             return
 
         if req_id == REQ_UNDERLYING:
-            print(f"DEBUG tick — type: {tick_type}  price: {price}")
+            logger.debug(f"tick — type: {tick_type}  price: {price}")
             # tick type 4 = last traded price
             # tick type 9 = close price — only used as fallback when market is closed
             if tick_type == 4 or (tick_type == 9 and self.und_price is None):
@@ -265,7 +270,8 @@ class TestConnection(EWrapper, EClient):
         """Store the first valid IBKR contract ID returned by reqContractDetails().
 
         Fired once per matching contract. Only the first result with a non-zero
-        conId is stored; subsequent results are ignored.
+        conId is stored; subsequent results are ignored. Any call arriving after
+        contractDetailsEnd() has fired is also silently ignored.
 
         Args:
             req_id (int): Identifies the request — only REQ_CONTRACT_DETAILS
@@ -275,6 +281,8 @@ class TestConnection(EWrapper, EClient):
         """
         if req_id != REQ_CONTRACT_DETAILS:
             return
+        if self._contract_details_done:
+            return  # End already fired — discard any late callbacks
         if self.underlying_con_id is not None:
             return  # already stored the first valid result — ignore subsequent ones
         if contract_details is None:
@@ -303,6 +311,7 @@ class TestConnection(EWrapper, EClient):
                 REQ_CONTRACT_DETAILS is handled.
         """
         if req_id == REQ_CONTRACT_DETAILS:
+            self._contract_details_done = True
             self.contract_id_ready.set()
 
     # ── option params (flow step 4) ───────────────────────────────────────────
@@ -340,8 +349,8 @@ class TestConnection(EWrapper, EClient):
         """
         if req_id != REQ_OPT_PARAMS:
             return
-        print(
-            f"DEBUG params — exchange: {exchange}  "
+        logger.debug(
+            f"params — exchange: {exchange}  "
             f"expirations: {len(expirations)}  strikes: {len(strikes)}"
         )
         # we only keep SMART exchange data to avoid duplicates
@@ -364,8 +373,8 @@ class TestConnection(EWrapper, EClient):
         """
         if req_id != REQ_OPT_PARAMS:
             return
-        print(
-            f"DEBUG params end — total expirations: {len(self.available_expirations)}  "
+        logger.debug(
+            f"params end — total expirations: {len(self.available_expirations)}  "
             f"total strikes: {len(self.available_strikes)}"
         )
         self.params_ready.set()
