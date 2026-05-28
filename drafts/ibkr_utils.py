@@ -142,18 +142,22 @@ def print_data(
     """
     print(f"\n--- {symbol} {expiry} strike {strike}  ({time.strftime('%H:%M:%S')}) ---")
 
-    def fmt(key: str, data: dict[str, float | None], digits: int) -> float:
+    def fmt(key: str, data: dict[str, float | None], digits: int, width: int) -> str:
         value = data.get(key)
-        return round(value if value is not None else 0.0, digits)
+        if key not in data:
+            return f"{'---':>{width}}"
+        if value is None:
+            return f"{'N/A':>{width}}"
+        return f"{round(value, digits):>{width}}"
 
     for label, data in [("CALL", call_data), ("PUT", put_data)]:
         print(
             f"  {label}"
-            f"  bid={fmt('bid', data, 2):>8}"
-            f"  ask={fmt('ask', data, 2):>8}"
-            f"  iv={fmt('iv', data, 4):>7}"
-            f"  delta={fmt('delta', data, 4):>7}"
-            f"  gamma={fmt('gamma', data, 4):>7}"
-            f"  theta={fmt('theta', data, 4):>8}"
-            f"  vega={fmt('vega', data, 4):>7}"
+            f"  bid={fmt('bid', data, 2, 8)}"
+            f"  ask={fmt('ask', data, 2, 8)}"
+            f"  iv={fmt('iv', data, 4, 7)}"
+            f"  delta={fmt('delta', data, 4, 7)}"
+            f"  gamma={fmt('gamma', data, 4, 7)}"
+            f"  theta={fmt('theta', data, 4, 8)}"
+            f"  vega={fmt('vega', data, 4, 7)}"
         )

@@ -235,10 +235,9 @@ class TestConnection(EWrapper, EClient):
             _attrib (TickAttrib): Additional tick attributes — not used by
                 this implementation.
         """
-        if price <= 0:
-            return
-
         if req_id == REQ_UNDERLYING:
+            if price <= 0:
+                return
             logger.debug(f"tick — type: {tick_type}  price: {price}")
             # tick type 4 = last traded price
             # tick type 9 = close price — only used as fallback when market is closed
@@ -247,19 +246,20 @@ class TestConnection(EWrapper, EClient):
                 self.und_ready.set()
 
         elif req_id == REQ_CALL:
+            # ibapi sends -1.0 for bid/ask when market is closed — store None to signal unavailable
             if tick_type == 1:
-                self.call_data["bid"] = price
+                self.call_data["bid"] = price if price > 0 else None
             elif tick_type == 2:
-                self.call_data["ask"] = price
-            elif tick_type == 4:
+                self.call_data["ask"] = price if price > 0 else None
+            elif tick_type == 4 and price > 0:
                 self.call_data["last"] = price
 
         elif req_id == REQ_PUT:
             if tick_type == 1:
-                self.put_data["bid"] = price
+                self.put_data["bid"] = price if price > 0 else None
             elif tick_type == 2:
-                self.put_data["ask"] = price
-            elif tick_type == 4:
+                self.put_data["ask"] = price if price > 0 else None
+            elif tick_type == 4 and price > 0:
                 self.put_data["last"] = price
 
     # ── contract ID (flow step 3) ─────────────────────────────────────────────
@@ -463,7 +463,7 @@ def main() -> None:
             return
         print("Connected to TWS")
 
-        # switch to frozen mode — returns last available values when market is closed,
+        # mode 2 = frozen — returns last values when market is closed,
         # falls back to live data automatically when market is open
         app.reqMarketDataType(2)
 

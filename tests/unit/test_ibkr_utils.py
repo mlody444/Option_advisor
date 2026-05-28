@@ -331,3 +331,36 @@ class TestPrintData:
         captured = capsys.readouterr().out
         assert "CALL" in captured
         assert "PUT" in captured
+
+    def test_missing_key_renders_dashes(self, capsys) -> None:
+        # #46-#48: "---" sentinel for missing keys — must appear verbatim and without XX wrapping
+        print_data("SPY", "20260620", 580.0, {}, {})
+        out = capsys.readouterr().out
+        assert "---" in out
+        assert "XX" not in out
+
+    def test_none_value_renders_na(self, capsys) -> None:
+        # #49-#50: None bid/ask must show "N/A", not "0" or "XX...XX"
+        call_data: dict[str, float | None] = {"bid": None, "ask": None}
+        print_data("SPY", "20260620", 580.0, call_data, {})
+        out = capsys.readouterr().out
+        assert "N/A" in out
+        assert "XX" not in out
+
+    def test_column_widths_exact(self, capsys) -> None:
+        # #56,#60,#64,#68,#72,#76,#80: width+1 shifts alignment — check exact spacing
+        # bid/ask are width 8, Greeks are width 7 except theta which is 8
+        # Use value 1.0 (renders as "1.0") — width 8 pads to "     1.0", width 9 to "      1.0"
+        call_data: dict[str, float | None] = {
+            "bid": 1.0, "ask": 1.0, "iv": 1.0,
+            "delta": 1.0, "gamma": 1.0, "theta": 1.0, "vega": 1.0,
+        }
+        print_data("SPY", "20260620", 580.0, call_data, {})
+        out = capsys.readouterr().out
+        assert "bid=     1.0" in out   # 8-wide: 5 spaces + "1.0"
+        assert "ask=     1.0" in out
+        assert "iv=    1.0" in out     # 7-wide: 4 spaces + "1.0"
+        assert "delta=    1.0" in out
+        assert "gamma=    1.0" in out
+        assert "theta=     1.0" in out  # 8-wide: 5 spaces + "1.0"
+        assert "vega=    1.0" in out
