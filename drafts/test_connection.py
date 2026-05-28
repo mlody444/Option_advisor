@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ── TWS connection settings ───────────────────────────────────────────────────
 HOST = "127.0.0.1"
 PORT = 5931
-CLIENT_ID = 10  # any number not used by other connections
+CLIENT_ID = 11  # any number not used by other connections
 SYMBOL = "IWM"
 TARGET_DTE = 7  # find the expiry closest to this number of days
 
@@ -122,6 +122,7 @@ class TestConnection(EWrapper, EClient):
     call_data: dict[str, float | None]
     put_data: dict[str, float | None]
     connected: threading.Event
+    ready: threading.Event
     underlying_con_id: int | None
     contract_id_ready: threading.Event
     _contract_details_done: bool
@@ -145,6 +146,8 @@ class TestConnection(EWrapper, EClient):
 
         # set when TWS confirms the connection is established
         self.connected = threading.Event()
+        # set when nextValidId fires — handshake fully complete, safe to send requests
+        self.ready = threading.Event()
 
         # underlying's internal IBKR contract ID — needed for reqSecDefOptParams
         self.underlying_con_id = None
@@ -160,7 +163,17 @@ class TestConnection(EWrapper, EClient):
         Fired by ibapi once after connect() succeeds. Sets the connected
         event so the main thread can continue past its wait() call.
         """
+        logger.info("connectAck")
         self.connected.set()
+
+    def nextValidId(self, order_id: int) -> None:
+        """Signal that the full TWS handshake is complete — safe to send requests now."""
+        logger.info(f"nextValidId: order_id={order_id}")
+        self.ready.set()
+
+    def connectionClosed(self) -> None:
+        """Log when TWS closes the connection from its side."""
+        logger.warning("TWS closed the connection")
 
     def marketDataType(self, _: int, market_data_type: int) -> None:
         """Log the active market data mode after reqMarketDataType() is called.
@@ -182,39 +195,30 @@ class TestConnection(EWrapper, EClient):
         print(f"Market data mode: {name}")
 
     # fired by ibapi for every error AND every status notification — both come through here
-    def error(
-        self,
-        req_id: int,
-        _error_time: str,
-        error_code: int,
-        error_string: str,
-        _advanced_order_reject_desc: str = "",
-    ) -> None:
-        """Handle errors and status notifications from TWS.
+    def error(self, *args) -> None:  # type: ignore[override]
+        """Handle errors and status notifications from TWS (version-agnostic signature).
 
-        Fired by ibapi for both real errors and info-level status notifications.
-        INFO_CODES (2000-2999) are silently ignored. Real errors are printed
-        with a plain-English description where available, otherwise the raw
-        ibapi message is used.
-
-        Args:
-            req_id (int): ID of the request that caused the error, or -1
-                for connection-level errors not tied to a specific request.
-            _error_time (str): Timestamp of the error — not used by this
-                implementation.
-            error_code (int): ibapi error code. Codes in INFO_CODES are
-                status notifications, not real errors.
-            error_string (str): ibapi's default message. Used as fallback
-                when error_code is not in KNOWN_ERRORS.
-            _advanced_order_reject_desc (str): Order reject detail for
-                order errors — not used by this implementation.
+        Accepts *args to tolerate ibapi version differences:
+        - pre-10.30:  (reqId, errorCode, errorString [, advancedOrderRejectJson])
+        - 10.30+:     (reqId, errorTime, errorCode, errorString [, advancedOrderRejectJson])
         """
-        # silently ignore status notifications — they are not errors
-        if error_code in self.INFO_CODES:
+        # 10.30+:    (reqId, errorTime:int, errorCode:int, errorString, advancedOrderRejectJson)
+        # pre-10.30: (reqId, errorCode:int, errorString [, advancedOrderRejectJson])
+        # distinguish by checking whether args[2] is an int (errorCode) → 10.30+
+        # or a str (errorString) → pre-10.30
+        if len(args) >= 4 and isinstance(args[2], int):
+            req_id, error_code, error_string = args[0], args[2], args[3]
+        elif len(args) >= 3:
+            req_id, error_code, error_string = args[0], args[1], args[2]
+        else:
             return
-        # use our plain-English description if available, otherwise ibapi's own message
+        # status notifications (2000-2999) — informational, not errors
+        if error_code in self.INFO_CODES:
+            logger.info("TWS: %s", error_string)
+            return
+        # real error — use plain-English description where available
         description = KNOWN_ERRORS.get(error_code, error_string)
-        print(f"IBKR error {error_code} (req {req_id}): {description}")
+        logger.error("IBKR %d (req %d): %s", error_code, req_id, description)
 
     # ── underlying price (flow step 2) ───────────────────────────────────────
 
@@ -236,6 +240,7 @@ class TestConnection(EWrapper, EClient):
                 this implementation.
         """
         if req_id == REQ_UNDERLYING:
+            logger.debug("tickPrice  tick_type=%d  price=%s", tick_type, price)
             if price <= 0:
                 return
             logger.debug(f"tick — type: {tick_type}  price: {price}")
@@ -449,19 +454,36 @@ def main() -> None:
     resolve contract ID → fetch option chain → subscribe → print loop.
     Disconnects cleanly on Ctrl+C or any early exit.
     """
+    logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+
     app = TestConnection()
 
     try:
         # connect and start the ibapi message loop in a background thread
         app.connect(HOST, PORT, CLIENT_ID)
-        api_thread = threading.Thread(target=app.run, daemon=True, name="ibapi")
+
+        def _run_with_crash_log() -> None:
+            try:
+                app.run()
+                logger.info("ibapi run() exited")
+            except Exception as exc:
+                import traceback
+                logger.error("ibapi run() crashed: %s", exc)
+                traceback.print_exc()
+
+        api_thread = threading.Thread(target=_run_with_crash_log, daemon=True, name="ibapi")
         api_thread.start()
 
-        # flow step 1 — wait until TWS fires connectAck
+        # flow step 1 — wait until TWS fires connectAck, then nextValidId (handshake done)
         if not app.connected.wait(timeout=10):
             print("Could not connect to TWS — check host, port and API settings")
             return
         print("Connected to TWS")
+
+        if not app.ready.wait(timeout=10):
+            print("Handshake incomplete — nextValidId never fired")
+            return
+        print("Handshake complete — sending requests")
 
         # mode 2 = frozen — returns last values when market is closed,
         # falls back to live data automatically when market is open
@@ -483,6 +505,7 @@ def main() -> None:
             regulatorySnapshot=False,
             mktDataOptions=[],
         )
+        logger.debug("reqMktData sent for underlying")
 
         # while we wait, ibapi background thread calls tickPrice() which sets und_price
         if not app.und_ready.wait(timeout=15):
