@@ -6,14 +6,17 @@ ibapi is mocked via conftest.py; callbacks are exercised directly without a live
 TWS connection.
 
 Flow covered:
-    TestConnectFlow       → connectAck sets connected event
-    TestContractIdFlow    → contractDetails + contractDetailsEnd interaction and late-callback guard
-    TestOptionChainFlow   → secDefOptParam accumulation → find_closest_expiry / find_closest_strike
+    TestConnectFlow        → connectAck sets connected; nextValidId sets ready; connectionClosed logs
+    TestContractIdFlow     → contractDetails + contractDetailsEnd interaction and late-callback guard
+    TestOptionChainFlow    → secDefOptParam accumulation → find_closest_expiry / find_closest_strike
     TestGreekStreamingFlow → tickPrice + tickOptionComputation → call_data / put_data → print_data
 """
 
+import logging
 from typing import ClassVar
 from unittest.mock import MagicMock
+
+import pytest
 
 from drafts.ibkr_utils import find_closest_expiry, find_closest_strike, print_data
 from drafts.test_connection import (
@@ -45,7 +48,12 @@ def make_contract_details(con_id: int) -> MagicMock:
 
 
 class TestConnectFlow:
-    """connectAck() transitions the connected event from clear to set."""
+    """ibapi two-stage handshake: connectAck (TCP) then nextValidId (full handshake).
+
+    connectAck sets connected (TCP gate); nextValidId sets ready (request gate).
+    The two events are independent — connectAck alone must never unlock request sending.
+    connectionClosed logs a warning when TWS drops the connection from its side.
+    """
 
     def test_pos_connectack_sets_connected(self) -> None:
         # step 1: fresh instance — event must be clear before ibapi fires
@@ -55,6 +63,29 @@ class TestConnectFlow:
         # step 2: ibapi fires connectAck — main thread can now proceed past .wait()
         app.connectAck()
         assert app.connected.is_set()
+
+    def test_pos_nextvalidid_sets_ready(self) -> None:
+        # step 1: fresh instance — ready must be clear until full handshake completes
+        app = make_app()
+        assert not app.ready.is_set()
+
+        # step 2: ibapi fires nextValidId — safe to send requests now
+        app.nextValidId(1)
+        assert app.ready.is_set()
+
+    def test_neg_connectack_alone_does_not_set_ready(self) -> None:
+        # TCP connected but handshake not yet complete — ready must stay clear
+        app = make_app()
+        app.connectAck()
+        assert app.connected.is_set()   # TCP gate open
+        assert not app.ready.is_set()   # request gate still closed
+
+    def test_pos_connectionclosed_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        # connectionClosed fires when TWS drops the connection from its side
+        app = make_app()
+        with caplog.at_level(logging.WARNING):
+            app.connectionClosed()
+        assert caplog.messages == ["TWS closed the connection"]
 
 
 # ── TestContractIdFlow ────────────────────────────────────────────────────────
@@ -298,11 +329,8 @@ class TestGreekStreamingFlow:
 
         # step 3: ibkr_utils renders the fully populated call_data
         print_data("IWM", "20991231", 200.0, app.call_data, {})
-        out = capsys.readouterr().out
-        assert "1.5" in out   # bid
-        assert "1.6" in out   # ask
-        assert "0.45" in out  # delta
-        assert "0.25" in out  # iv
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=     1.5  ask=     1.6  iv=   0.25  delta=   0.45  gamma=   0.02  theta=   -0.05  vega=   0.15"
 
     def test_pos_call_and_put_rendered_independently(self, capsys) -> None:  # type: ignore[no-untyped-def]
         # step 1: call prices and greeks
@@ -316,9 +344,9 @@ class TestGreekStreamingFlow:
 
         # step 3: print_data renders both sides without cross-contamination
         print_data("IWM", "20991231", 200.0, app.call_data, app.put_data)
-        out = capsys.readouterr().out
-        assert "0.45" in out   # call delta
-        assert "-0.55" in out  # put delta
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=     1.5  ask=     ---  iv=   0.25  delta=   0.45  gamma=   0.02  theta=   -0.05  vega=   0.15"
+        assert lines[3] == "  PUT  bid=     1.4  ask=     ---  iv=   0.25  delta=  -0.55  gamma=   0.02  theta=   -0.05  vega=   0.15"
 
     def test_neg_invalid_greeks_render_as_zero_in_print_data(self, capsys) -> None:  # type: ignore[no-untyped-def]
         # step 1: tickOptionComputation arrives with NaN delta and sentinel iv
@@ -335,6 +363,18 @@ class TestGreekStreamingFlow:
         assert "nan" not in out
         assert "None" not in out
 
+    def test_neg_market_closed_bid_renders_as_na(self, capsys) -> None:  # type: ignore[no-untyped-def]
+        # ibapi sends -1.0 for bid/ask when market is closed
+        # tickPrice stores None; print_data must render it as N/A (key present) not --- (key absent)
+        app = make_app()
+        app.tickPrice(REQ_CALL, 1, -1.0, MagicMock())   # bid = -1.0 → None
+        app.tickPrice(REQ_CALL, 2, -1.0, MagicMock())   # ask = -1.0 → None
+
+        print_data("IWM", "20991231", 200.0, app.call_data, {})
+        out = capsys.readouterr().out
+        call_line = next(l for l in out.splitlines() if l.startswith("  CALL"))
+        assert call_line == "  CALL  bid=     N/A  ask=     N/A  iv=    ---  delta=    ---  gamma=    ---  theta=     ---  vega=    ---"
+
     def test_neg_later_price_tick_overwrites_earlier(self, capsys) -> None:  # type: ignore[no-untyped-def]
         # step 1: initial bid arrives
         app = make_app()
@@ -345,5 +385,5 @@ class TestGreekStreamingFlow:
 
         # step 3: print_data must show the latest value, not the first
         print_data("IWM", "20991231", 200.0, app.call_data, {})
-        out = capsys.readouterr().out
-        assert "1.75" in out
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=    1.75  ask=     ---  iv=    ---  delta=    ---  gamma=    ---  theta=     ---  vega=    ---"

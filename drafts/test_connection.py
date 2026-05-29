@@ -13,6 +13,7 @@ What it does:
 import logging
 import threading
 import time
+import traceback
 from datetime import date
 
 from ibapi.client import EClient
@@ -94,6 +95,13 @@ class TestConnection(EWrapper, EClient):
     The same object plays both roles; EClient receives self as its wrapper.
     All collected state is stored as plain instance attributes and read by main().
 
+    Testing:
+        Unit tests (SWE.4): tests/unit/test_test_connection.py
+            — each callback tested in isolation; no TWS connection required.
+        Integration tests (SWE.5): tests/integration/test_test_connection.py
+            — multi-callback flows and boundaries with ibkr_utils functions tested;
+               no TWS connection required.
+
     Attributes:
         INFO_CODES (range): ibapi status codes 2000-2999 — status notifications, not errors.
         und_price (float | None): Last known underlying price, set by tickPrice().
@@ -105,9 +113,12 @@ class TestConnection(EWrapper, EClient):
             bid, ask, iv, delta, gamma, theta, vega.
         put_data (dict[str, float | None]): Latest ATM put data — same structure as call_data.
         connected (threading.Event): Set when TWS fires connectAck.
+        ready (threading.Event): Set when nextValidId fires — handshake done, safe to send requests.
         underlying_con_id (int | None): Internal IBKR contract ID, set by contractDetails().
         contract_id_ready (threading.Event): Set when contractDetailsEnd fires.
     """
+
+    __test__ = False  # prevent pytest from collecting this as a test class
 
     # ibapi's 2000-2999 range = status notifications (data farm connected, etc.)
     # using range() means any new 2xxx code ibapi adds is handled automatically.
@@ -195,7 +206,7 @@ class TestConnection(EWrapper, EClient):
         print(f"Market data mode: {name}")
 
     # fired by ibapi for every error AND every status notification — both come through here
-    def error(self, *args) -> None:  # type: ignore[override]
+    def error(self, *args: object) -> None:
         """Handle errors and status notifications from TWS (version-agnostic signature).
 
         Accepts *args to tolerate ibapi version differences:
@@ -208,7 +219,7 @@ class TestConnection(EWrapper, EClient):
         # or a str (errorString) → pre-10.30
         if len(args) >= 4 and isinstance(args[2], int):
             req_id, error_code, error_string = args[0], args[2], args[3]
-        elif len(args) >= 3:
+        elif len(args) >= 3 and isinstance(args[1], int):
             req_id, error_code, error_string = args[0], args[1], args[2]
         else:
             return
@@ -467,7 +478,6 @@ def main() -> None:
                 app.run()
                 logger.info("ibapi run() exited")
             except Exception as exc:
-                import traceback
                 logger.error("ibapi run() crashed: %s", exc)
                 traceback.print_exc()
 

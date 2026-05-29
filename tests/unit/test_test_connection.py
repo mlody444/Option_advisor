@@ -7,8 +7,11 @@ covered in tests/integration/test_test_connection.py.
 ibapi is mocked via conftest.py; no TWS connection is needed.
 """
 
+import logging
 from typing import ClassVar
 from unittest.mock import MagicMock
+
+import pytest
 
 from drafts.test_connection import (
     KNOWN_ERRORS,
@@ -40,7 +43,7 @@ def make_contract_details(con_id: int) -> MagicMock:
 
 
 class TestConnectAckCallback:
-    """Guard conditions for connectAck()."""
+    """Guard conditions for connectAck(), nextValidId(), and connectionClosed()."""
 
     def test_pos_connectack_sets_connected(self) -> None:
         # step 1: fresh instance — connected event clear
@@ -52,6 +55,29 @@ class TestConnectAckCallback:
 
         # step 3: event set — main thread can proceed past .wait()
         assert app.connected.is_set()
+
+    def test_pos_nextvalidid_sets_ready(self) -> None:
+        # step 1: fresh instance — ready must be clear until full handshake completes
+        app = make_app()
+        assert not app.ready.is_set()
+
+        # step 2: ibapi fires nextValidId — safe to send requests now
+        app.nextValidId(1)
+        assert app.ready.is_set()
+
+    def test_neg_connectack_alone_does_not_set_ready(self) -> None:
+        # TCP connected but handshake not yet complete — ready must stay clear
+        app = make_app()
+        app.connectAck()
+        assert app.connected.is_set()   # TCP gate open
+        assert not app.ready.is_set()   # request gate still closed
+
+    def test_pos_connectionclosed_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+        # connectionClosed fires when TWS drops the connection from its side
+        app = make_app()
+        with caplog.at_level(logging.WARNING):
+            app.connectionClosed()
+        assert caplog.messages == ["TWS closed the connection"]
 
 
 # ── TestMarketDataTypeCallback ────────────────────────────────────────────────
@@ -244,6 +270,19 @@ class TestTickPrice:
 
         # step 3: put_data stays empty
         assert app.put_data == {}
+
+    def test_neg_call_bid_minus_one_stored_as_none(self) -> None:
+        # ibapi sends -1.0 for bid/ask when market is closed
+        # key must be present with None — distinct from key absent (--- vs N/A in print_data)
+        app = make_app()
+        app.tickPrice(REQ_CALL, 1, -1.0, MagicMock())
+        assert app.call_data == {"bid": None}
+
+    def test_neg_call_ask_minus_one_stored_as_none(self) -> None:
+        # same market-closed guard for ask
+        app = make_app()
+        app.tickPrice(REQ_CALL, 2, -1.0, MagicMock())
+        assert app.call_data == {"ask": None}
 
 
 # ── TestContractDetailsCallbacks ──────────────────────────────────────────────
@@ -504,6 +543,18 @@ class TestGreeksCallbacks:
         # step 3: call_data stays empty
         assert app.call_data == {}
 
+    def test_neg_nan_delta_stored_as_none(self) -> None:
+        # NaN is one of three ways ibapi signals a Greek is unavailable
+        app = make_app()
+        self._fire(app, REQ_CALL, delta=float("nan"))
+        assert app.call_data["delta"] is None
+
+    def test_neg_sentinel_iv_stored_as_none(self) -> None:
+        # abs(x) > 1e6 is ibapi's sentinel for an uncomputable Greek
+        app = make_app()
+        self._fire(app, REQ_CALL, implied_vol=2e6)
+        assert app.call_data["iv"] is None
+
 
 # ── TestErrorCallback ─────────────────────────────────────────────────────────
 
@@ -511,60 +562,62 @@ class TestGreeksCallbacks:
 class TestErrorCallback:
     """Guard conditions for error()."""
 
-    def test_neg_info_code_produces_no_output(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_neg_info_code_produces_no_output(self, capsys, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: ibapi fires a 2xxx status notification (not a real error)
-        app.error(1, "", 2104, "Data farm connected", "")
+        with caplog.at_level(logging.INFO):
+            app.error(1, "", 2104, "Data farm connected", "")
 
-        # step 3: no output — status notifications are silently dropped
+        # step 3: no stdout output AND exactly one INFO record — not an error
         assert capsys.readouterr().out == ""
+        assert caplog.messages == ["TWS: Data farm connected"]
 
-    def test_neg_info_range_boundaries_silent(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_neg_info_range_boundaries_silent(self, capsys, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: fire codes at both ends of the INFO_CODES range
-        app.error(-1, "", 2000, "range start", "")
-        app.error(-1, "", 2999, "range end", "")
+        with caplog.at_level(logging.INFO):
+            app.error(-1, "", 2000, "range start", "")
+            app.error(-1, "", 2999, "range end", "")
 
-        # step 3: both boundaries produce no output
+        # step 3: no stdout output AND exactly two INFO records — not errors
         assert capsys.readouterr().out == ""
+        assert caplog.messages == ["TWS: range start", "TWS: range end"]
 
-    def test_neg_code_below_info_range_is_printed(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_neg_code_below_info_range_is_printed(self, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: error code 1999 — just below INFO_CODES range
         app.error(-1, "", 1999, "below range", "")
 
-        # step 3: real error — output must be produced
-        assert capsys.readouterr().out != ""
+        # step 3: exactly one log record with the full formatted message
+        assert caplog.messages == ["IBKR 1999 (req -1): below range"]
 
-    def test_neg_code_above_info_range_is_printed(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_neg_code_above_info_range_is_printed(self, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: error code 3000 — just above INFO_CODES range
         app.error(-1, "", 3000, "above range", "")
 
-        # step 3: real error — output must be produced
-        assert capsys.readouterr().out != ""
+        # step 3: exactly one log record with the full formatted message
+        assert caplog.messages == ["IBKR 3000 (req -1): above range"]
 
-    def test_pos_known_error_shows_custom_description(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_pos_known_error_shows_custom_description(self, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: fire a known error code (502 = cannot connect to TWS)
         app.error(-1, "", 502, "original ibapi message", "")
 
-        # step 3: custom description used, not the raw ibapi message
-        out = capsys.readouterr().out
-        assert KNOWN_ERRORS[502] in out
-        assert "original ibapi message" not in out
+        # step 3: custom description used — exact equality also excludes the raw ibapi message
+        assert caplog.messages == [f"IBKR 502 (req -1): {KNOWN_ERRORS[502]}"]
 
-    def test_pos_unknown_error_shows_raw_message(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_pos_unknown_error_shows_raw_message(self, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
@@ -572,16 +625,21 @@ class TestErrorCallback:
         app.error(-1, "", 9999, "raw ibapi error text", "")
 
         # step 3: raw message used as fallback
-        assert "raw ibapi error text" in capsys.readouterr().out
+        assert caplog.messages == ["IBKR 9999 (req -1): raw ibapi error text"]
 
-    def test_pos_error_output_contains_code_and_req_id(self, capsys) -> None:  # type: ignore[no-untyped-def]
+    def test_pos_error_output_contains_code_and_req_id(self, caplog) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
 
         # step 2: fire an error tied to a specific request
         app.error(42, "", 9999, "something failed", "")
 
-        # step 3: both the error code and request ID appear in output
-        out = capsys.readouterr().out
-        assert "9999" in out
-        assert "42" in out
+        # step 3: full formatted message with code and request ID
+        assert caplog.messages == ["IBKR 9999 (req 42): something failed"]
+
+    def test_neg_malformed_args_are_silently_discarded(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        # args don't match either ibapi version pattern — exercises the else: return branch
+        app = make_app()
+        with caplog.at_level(logging.DEBUG):
+            app.error("not-an-int", "not-an-int")   # too few args, no int in positions 1 or 2
+        assert caplog.messages == []

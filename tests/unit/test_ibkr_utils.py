@@ -1,3 +1,4 @@
+import re
 from datetime import date as _real_date
 
 import pytest
@@ -232,17 +233,19 @@ class TestPrintData:
 
     def test_symbol_in_output(self, capsys) -> None:
         print_data("IWM", "20260516", 220.0, {}, {})
-        assert "IWM" in capsys.readouterr().out
+        header = capsys.readouterr().out.splitlines()[1]
+        assert header.split("(")[0] == "--- IWM 20260516 strike 220.0  "
 
     def test_expiry_in_output(self, capsys) -> None:
         print_data("IWM", "20260516", 220.0, {}, {})
-        assert "20260516" in capsys.readouterr().out
+        header = capsys.readouterr().out.splitlines()[1]
+        assert header.split("(")[0] == "--- IWM 20260516 strike 220.0  "
 
     def test_call_and_put_labels_present(self, capsys) -> None:
         print_data("SPY", "20260620", 580.0, {}, {})
-        captured = capsys.readouterr().out
-        assert "CALL" in captured
-        assert "PUT" in captured
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=     ---  ask=     ---  iv=    ---  delta=    ---  gamma=    ---  theta=     ---  vega=    ---"
+        assert lines[3] == "  PUT  bid=     ---  ask=     ---  iv=    ---  delta=    ---  gamma=    ---  theta=     ---  vega=    ---"
 
     def test_call_and_put_label_exact_format(self, capsys) -> None:
         # #46/#47: "XXCALLXX"/"XXPUTXX" still contain "CALL"/"PUT" so the old test misses them;
@@ -274,9 +277,8 @@ class TestPrintData:
             "delta": 0.43, "gamma": 0.02, "theta": -0.05, "vega": 0.12,
         }
         print_data("SPY", "20260620", 580.0, call_data, {})
-        out = capsys.readouterr().out
-        for expected in ["1.23", "4.56", "0.25", "0.43", "0.02", "-0.05", "0.12"]:
-            assert expected in out
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=    1.23  ask=    4.56  iv=   0.25  delta=   0.43  gamma=   0.02  theta=   -0.05  vega=   0.12"
 
     def test_missing_keys_default_to_zero(self, capsys) -> None:
         # #45: fallback 0.0 → 1.0 — "assert '0.0' in out" is not enough because the strike
@@ -288,7 +290,6 @@ class TestPrintData:
     def test_header_format(self, capsys) -> None:
         # #42: mutant wraps the whole header in "XX...XX", breaking the "\n---" prefix
         # #41: mutant corrupts the strftime format to "XX%H:%M:%SXX", breaking HH:MM:SS shape
-        import re
         print_data("IWM", "20260516", 220.0, {}, {})
         out = capsys.readouterr().out
         assert "\n---" in out
@@ -328,9 +329,9 @@ class TestPrintData:
             "delta": -0.55, "gamma": 0.02, "theta": -0.04, "vega": 0.14,
         }
         print_data("SPY", "20260620", 580.0, call_data, put_data)
-        captured = capsys.readouterr().out
-        assert "CALL" in captured
-        assert "PUT" in captured
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[2] == "  CALL  bid=     1.5  ask=     1.6  iv=   0.25  delta=   0.45  gamma=   0.02  theta=   -0.05  vega=   0.15"
+        assert lines[3] == "  PUT  bid=     1.4  ask=     1.5  iv=   0.24  delta=  -0.55  gamma=   0.02  theta=   -0.04  vega=   0.14"
 
     def test_missing_key_renders_dashes(self, capsys) -> None:
         # #46-#48: "---" sentinel for missing keys — must appear verbatim and without XX wrapping
@@ -364,3 +365,19 @@ class TestPrintData:
         assert "gamma=    1.0" in out
         assert "theta=     1.0" in out  # 8-wide: 5 spaces + "1.0"
         assert "vega=    1.0" in out
+
+    def test_vega_precision_four_decimals_isolated(self, capsys) -> None:
+        # #79: vega precision 4→5 — isolated so mutation is uniquely observable without
+        # other fields masking the change; 0.12346 rounds to 0.1235 at 4dp, 0.12346 at 5dp
+        call_data: dict[str, float | None] = {"vega": 0.12346}
+        print_data("SPY", "20260620", 580.0, call_data, {})
+        out = capsys.readouterr().out
+        assert "vega= 0.1235" in out  # 7-wide, 4dp: " 0.1235"
+
+    def test_vega_width_seven_isolated(self, capsys) -> None:
+        # #80: vega width 7→8 — isolated so mutation is uniquely observable;
+        # 1.0 at width 7 pads to "    1.0" (4 spaces), width 8 gives "     1.0" (5 spaces)
+        call_data: dict[str, float | None] = {"vega": 1.0}
+        print_data("SPY", "20260620", 580.0, call_data, {})
+        out = capsys.readouterr().out
+        assert "vega=    1.0" in out  # 7-wide: 4 spaces + "1.0"

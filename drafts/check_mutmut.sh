@@ -31,7 +31,19 @@ EOF
 source "$VENV/bin/activate"
 set +e
 rm -rf mutants .mutmut-cache  # mutmut v2 caches by source only — stale on test changes
-python -m mutmut run
+
+# Tee to a temp file so we can detect baseline failure while still showing output live
+MUTMUT_LOG=$(mktemp)
+python -m mutmut run 2>&1 | tee "$MUTMUT_LOG"
+
+# If mutmut never reached "Checking mutants", the baseline test suite was broken
+if ! grep -q "Checking mutants" "$MUTMUT_LOG"; then
+    rm -f "$MUTMUT_LOG"
+    echo ""
+    echo "FAILED - mutmut baseline failed: test suite is broken without mutations"
+    exit 1
+fi
+rm -f "$MUTMUT_LOG"
 # do NOT re-enable set -e here — the reporting block below must capture its own exit code
 
 python - <<'PYEOF'
