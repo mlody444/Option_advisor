@@ -38,6 +38,10 @@ CLIENT_ID = 11  # any number not used by other connections
 SYMBOL = "IWM"
 TARGET_DTE = 7  # find the expiry closest to this number of days
 
+# ── timeouts ──────────────────────────────────────────────────────────────────
+CONNECT_TIMEOUT = 10  # seconds to wait for connectAck + nextValidId
+DATA_TIMEOUT = 15  # seconds to wait for market data, contract details, option params
+PRINT_INTERVAL = 2  # seconds between data refreshes in the streaming loop
 
 # ── request ID constants ──────────────────────────────────────────────────────
 REQ_UNDERLYING = 1
@@ -116,6 +120,10 @@ class TestConnection(EWrapper, EClient):
         ready (threading.Event): Set when nextValidId fires — handshake done, safe to send requests.
         underlying_con_id (int | None): Internal IBKR contract ID, set by contractDetails().
         contract_id_ready (threading.Event): Set when contractDetailsEnd fires.
+        failed (threading.Event): Set when the ibapi background thread crashes or a critical
+            error (502, 504) is received — signals main() to stop waiting.
+        failure_message (str | None): Human-readable reason set alongside failed, or None
+            when the cause is an unexpected thread crash (see logs).
     """
 
     __test__ = False  # prevent pytest from collecting this as a test class
@@ -137,6 +145,8 @@ class TestConnection(EWrapper, EClient):
     underlying_con_id: int | None
     contract_id_ready: threading.Event
     _contract_details_done: bool
+    failed: threading.Event
+    failure_message: str | None
 
     def __init__(self) -> None:
         EWrapper.__init__(self)
@@ -164,6 +174,8 @@ class TestConnection(EWrapper, EClient):
         self.underlying_con_id = None
         self.contract_id_ready = threading.Event()
         self._contract_details_done = False
+        self.failed = threading.Event()
+        self.failure_message: str | None = None
 
     # ── connection (flow step 1) ──────────────────────────────────────────────
 
@@ -213,13 +225,23 @@ class TestConnection(EWrapper, EClient):
         - pre-10.30:  (reqId, errorCode, errorString [, advancedOrderRejectJson])
         - 10.30+:     (reqId, errorTime, errorCode, errorString [, advancedOrderRejectJson])
         """
-        # 10.30+:    (reqId, errorTime:int, errorCode:int, errorString, advancedOrderRejectJson)
-        # pre-10.30: (reqId, errorCode:int, errorString [, advancedOrderRejectJson])
-        # distinguish by checking whether args[2] is an int (errorCode) → 10.30+
-        # or a str (errorString) → pre-10.30
-        if len(args) >= 4 and isinstance(args[2], int):
+        # 10.30+:    (reqId:int, errorTime:int, errorCode:int, errorString:str, ...)
+        # pre-10.30: (reqId:int, errorCode:int, errorString:str, ...)
+        # Full isinstance guards narrow all three extracted values for mypy and validate
+        # the payload — malformed args fall through to else: return (same as before).
+        if (
+            len(args) >= 4
+            and isinstance(args[0], int)
+            and isinstance(args[2], int)
+            and isinstance(args[3], str)
+        ):
             req_id, error_code, error_string = args[0], args[2], args[3]
-        elif len(args) >= 3 and isinstance(args[1], int):
+        elif (
+            len(args) >= 3
+            and isinstance(args[0], int)
+            and isinstance(args[1], int)
+            and isinstance(args[2], str)
+        ):
             req_id, error_code, error_string = args[0], args[1], args[2]
         else:
             return
@@ -230,6 +252,10 @@ class TestConnection(EWrapper, EClient):
         # real error — use plain-English description where available
         description = KNOWN_ERRORS.get(error_code, error_string)
         logger.error("IBKR %d (req %d): %s", error_code, req_id, description)
+        # critical codes mean the connection will never recover — wake main() immediately
+        if error_code in (502, 504):
+            self.failure_message = description
+            self.failed.set()
 
     # ── underlying price (flow step 2) ───────────────────────────────────────
 
@@ -480,18 +506,25 @@ def main() -> None:
             except Exception as exc:
                 logger.error("ibapi run() crashed: %s", exc)
                 traceback.print_exc()
+                app.failed.set()
 
         api_thread = threading.Thread(target=_run_with_crash_log, daemon=True, name="ibapi")
         api_thread.start()
 
         # flow step 1 — wait until TWS fires connectAck, then nextValidId (handshake done)
-        if not app.connected.wait(timeout=10):
-            print("Could not connect to TWS — check host, port and API settings")
+        if not app.connected.wait(timeout=CONNECT_TIMEOUT):
+            if app.failed.is_set():
+                print(app.failure_message or "ibapi thread crashed — check logs above")
+            else:
+                print("Could not connect to TWS — check host, port and API settings")
             return
         print("Connected to TWS")
 
-        if not app.ready.wait(timeout=10):
-            print("Handshake incomplete — nextValidId never fired")
+        if not app.ready.wait(timeout=CONNECT_TIMEOUT):
+            if app.failed.is_set():
+                print(app.failure_message or "ibapi thread crashed — check logs above")
+            else:
+                print("Handshake incomplete — nextValidId never fired")
             return
         print("Handshake complete — sending requests")
 
@@ -518,8 +551,11 @@ def main() -> None:
         logger.debug("reqMktData sent for underlying")
 
         # while we wait, ibapi background thread calls tickPrice() which sets und_price
-        if not app.und_ready.wait(timeout=15):
-            print("Could not get underlying price — check TWS connection")
+        if not app.und_ready.wait(timeout=DATA_TIMEOUT):
+            if app.failed.is_set():
+                print(app.failure_message or "ibapi thread crashed — check logs above")
+            else:
+                print("Could not get underlying price — check TWS connection")
             return
         print(f"{SYMBOL} price: {app.und_price}")
 
@@ -532,8 +568,11 @@ def main() -> None:
 
         # while we wait, ibapi background thread calls contractDetails() then contractDetailsEnd()
         # contractDetails() saves the conId, contractDetailsEnd() sets contract_id_ready
-        if not app.contract_id_ready.wait(timeout=15):
-            print(f"Could not get {SYMBOL} contract ID — check TWS connection")
+        if not app.contract_id_ready.wait(timeout=DATA_TIMEOUT):
+            if app.failed.is_set():
+                print(app.failure_message or "ibapi thread crashed — check logs above")
+            else:
+                print(f"Could not get {SYMBOL} contract ID — check TWS connection")
             return
         if app.underlying_con_id is None:
             print(f"Contract details returned no valid conId for {SYMBOL}")
@@ -553,14 +592,15 @@ def main() -> None:
         # once per exchange — we keep only SMART data to avoid duplicates.
         # securityDefinitionOptionParameterEnd() fires last and sets params_ready.
         # by that point app.available_expirations and app.available_strikes are fully populated.
-        if not app.params_ready.wait(timeout=15):
-            print("Could not get option parameters — check TWS connection")
+        if not app.params_ready.wait(timeout=DATA_TIMEOUT):
+            if app.failed.is_set():
+                print(app.failure_message or "ibapi thread crashed — check logs above")
+            else:
+                print("Could not get option parameters — check TWS connection")
             return
 
         # flow step 5 — pick the closest expiry to TARGET_DTE and the ATM strike
-        if app.und_price is None:
-            print("Underlying price is not set — this should not happen")
-            return
+        assert app.und_price is not None  # nosec B101 — invariant, not a security gate
         expiry = find_closest_expiry(app.available_expirations, TARGET_DTE)
         strike = find_closest_strike(app.available_strikes, app.und_price)
 
@@ -578,11 +618,7 @@ def main() -> None:
             return
 
         today = date.today()
-        try:
-            expiry_date = expiry_to_date(expiry)
-        except ValueError as err:
-            print(f"Could not parse selected expiry — {err}")
-            return
+        expiry_date = expiry_to_date(expiry)
         dte = (expiry_date - today).days
         print(f"Using expiry {expiry} (DTE {dte})  strike {strike}")
 
@@ -612,7 +648,7 @@ def main() -> None:
         print("\nStreaming data — press Ctrl+C to stop\n")
         while True:
             print_data(SYMBOL, expiry, strike, app.call_data, app.put_data)
-            time.sleep(2)
+            time.sleep(PRINT_INTERVAL)
 
     except KeyboardInterrupt:
         print("\nStopped by user")
