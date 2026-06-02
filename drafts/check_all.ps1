@@ -7,8 +7,9 @@ $scripts = [ordered]@{
     "Mypy"        = ".\drafts\check_types.ps1"
     "Pydoclint"   = ".\drafts\check_docs.ps1"
     "Security"    = ".\drafts\check_security.ps1"
-    "Pytest"      = ".\drafts\check_tests.ps1"
-    "Mutmut"      = ".\drafts\check_mutmut.ps1"
+    "Pytest (offline)" = ".\drafts\check_tests.ps1"
+    "Pytest (live)"    = ".\drafts\check_live.ps1"
+    "Mutmut"           = ".\drafts\check_mutmut.ps1"
 }
 
 $results = [ordered]@{}

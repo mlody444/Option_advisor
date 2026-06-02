@@ -87,13 +87,15 @@ class TestMarketDataTypeCallback:
     """Guard conditions for marketDataType()."""
 
     def test_pos_known_mode_prints_human_readable_name(self, capsys) -> None:  # type: ignore[no-untyped-def]
-        # step 1: fresh instance
+        # step 1: fresh instance — market_data_type starts at 0 (not yet confirmed by TWS)
         app = make_app()
+        assert app.market_data_type == 0
 
         # step 2: ibapi confirms mode 1 (live data)
         app.marketDataType(0, 1)
 
-        # step 3: human-readable label appears in output
+        # step 3: mode is stored and human-readable label appears in output
+        assert app.market_data_type == 1
         out = capsys.readouterr().out
         assert "Market data mode:" in out
         assert "live" in out
@@ -101,11 +103,13 @@ class TestMarketDataTypeCallback:
     def test_neg_unknown_mode_prints_raw_code(self, capsys) -> None:  # type: ignore[no-untyped-def]
         # step 1: fresh instance
         app = make_app()
+        assert app.market_data_type == 0
 
         # step 2: ibapi sends an unrecognised mode code
         app.marketDataType(0, 99)
 
-        # step 3: raw numeric code used as fallback — no KeyError raised
+        # step 3: mode is stored and raw numeric code used as fallback — no KeyError raised
+        assert app.market_data_type == 99
         out = capsys.readouterr().out
         assert "Market data mode:" in out
         assert "99" in out

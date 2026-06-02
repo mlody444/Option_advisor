@@ -124,6 +124,8 @@ class TestConnection(EWrapper, EClient):
             error (502, 504) is received — signals main() to stop waiting.
         failure_message (str | None): Human-readable reason set alongside failed, or None
             when the cause is an unexpected thread crash (see logs).
+        market_data_type (int): Active market data mode confirmed by TWS — 1 live, 2 frozen,
+            3 delayed, 4 delayed frozen. Stored primarily for testability.
     """
 
     __test__ = False  # prevent pytest from collecting this as a test class
@@ -147,6 +149,7 @@ class TestConnection(EWrapper, EClient):
     _contract_details_done: bool
     failed: threading.Event
     failure_message: str | None
+    market_data_type: int
 
     def __init__(self) -> None:
         EWrapper.__init__(self)
@@ -176,6 +179,8 @@ class TestConnection(EWrapper, EClient):
         self._contract_details_done = False
         self.failed = threading.Event()
         self.failure_message: str | None = None
+        # stored primarily for testability — lets tests assert live vs frozen mode
+        self.market_data_type: int = 0
 
     # ── connection (flow step 1) ──────────────────────────────────────────────
 
@@ -214,6 +219,7 @@ class TestConnection(EWrapper, EClient):
             3: "delayed 15 min",
             4: "delayed frozen",
         }
+        self.market_data_type = market_data_type
         name = names.get(market_data_type, str(market_data_type))
         print(f"Market data mode: {name}")
 
