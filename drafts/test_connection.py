@@ -490,7 +490,7 @@ class TestConnection(EWrapper, EClient):
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Connect to TWS, subscribe to the ATM option near TARGET_DTE, and stream Greeks.
 
     Runs the full flow sequentially: connect → get underlying price →
@@ -664,5 +664,5 @@ def main() -> None:
         app.disconnect()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

@@ -9,6 +9,7 @@ $scripts = [ordered]@{
     "Security"    = ".\drafts\check_security.ps1"
     "Pytest (offline)" = ".\drafts\check_tests.ps1"
     "Pytest (live)"    = ".\drafts\check_live.ps1"
+    "Coverage"         = ".\drafts\check_coverage.ps1"
     "Mutmut"           = ".\drafts\check_mutmut.ps1"
 }
 

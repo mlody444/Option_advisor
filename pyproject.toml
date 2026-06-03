@@ -42,12 +42,21 @@ exclude = ["drafts*", "tests*"]  # not distributable — drafts/ is exploratory 
 [tool.mypy]
 python_version        = "3.11"
 strict                = true
+warn_unreachable      = true      # catch dead code after return/raise
 disallow_subclassing_any = false  # ibapi ships no stubs — EWrapper/EClient are typed as Any
 
 [[tool.mypy.overrides]]
 # ibapi ships no type stubs — ignore all missing-import errors for it
 module                = "ibapi.*"
 ignore_missing_imports = true
+
+# ── coverage ─────────────────────────────────────────────────────────────────
+
+[tool.coverage.run]
+omit = [
+    "drafts/ui_demo.py",           # standalone UI demo — no offline tests planned
+    "drafts/tempCodeRunnerFile.py", # VS Code temp file — not production code
+]
 
 # ── pydoclint ────────────────────────────────────────────────────────────────
 
