@@ -2,14 +2,26 @@
 env/
 venv/
 .venv/
+.venv-wsl/
 
 # Python cache
 __pycache__/
 *.py[cod]
 
+# build artifacts
+dist/
+build/
+*.egg-info/
+
 # tool caches
 .ruff_cache/
 .mypy_cache/
+.mutmut-cache
+mutants/
+
+# coverage artefacts
+.coverage
+htmlcov/
 
 # VS Code Code Runner artifact
 tempCodeRunnerFile.py

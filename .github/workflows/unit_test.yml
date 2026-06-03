@@ -1,0 +1,73 @@
+# Workflow name — displayed in the GitHub Actions tab
+name: Unit tests
+
+# When to run this workflow
+on:
+  pull_request:         # run on every pull request (any branch → any branch)
+  push:
+    branches: [master]  # also run when code is pushed directly to master
+
+# Cancel any in-flight run for the same workflow + branch when a new commit arrives
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Jobs are independent units of work that run on separate virtual machines.
+# Multiple jobs run in parallel by default; steps within a job run sequentially.
+jobs:
+
+  # Job name — shown in GitHub UI and used in branch protection rules
+  unit_test:
+
+    # GitHub provides a fresh Ubuntu Linux virtual machine for each run
+    # Ubuntu is required by mutmut which uses os.fork() — not available on Windows
+    runs-on: ubuntu-latest
+    env:
+      HYPOTHESIS_PROFILE: ci  # use more examples on CI; local runs default to fewer (see tests/conftest.py)
+
+    # Steps run sequentially inside the job — each step must pass for the next to start
+    steps:
+
+      # Step 1 — download the repository code onto the virtual machine
+      - uses: actions/checkout@v4
+
+      # Step 2 — install Python using the version pinned in .python-version
+      #           cache: 'pip' reuses downloaded packages across runs — only re-downloads
+      #           when pyproject.toml changes (new package or version bump)
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      # Step 3 — install all dev dependencies (versions from pyproject.toml — single source of truth)
+      #           ibapi is not on PyPI — tests/conftest.py mocks it automatically when missing
+      - name: Install dev dependencies
+        run: |
+          python - <<'EOF'
+          import tomllib, subprocess, sys
+          with open("pyproject.toml", "rb") as f:
+              dev = tomllib.load(f)["project"]["optional-dependencies"]["dev"]
+          subprocess.run([sys.executable, "-m", "pip", "install"] + dev, check=True)
+          EOF
+
+      # Step 4 — audit dependencies for known CVEs
+      #           CVE-2025-4565 and CVE-2026-0994 are ignored: ibapi==10.37.2 hard-pins
+      #           protobuf==5.29.3 and cannot be upgraded without breaking ibapi
+      - name: Audit dependencies
+        run: pip-audit --ignore-vuln CVE-2025-4565 --ignore-vuln CVE-2026-0994
+
+      # Step 5 — run unit tests; non-zero exit code fails the job
+      - name: Run unit tests
+        run: python -m pytest tests/unit/
+
+      # Step 6 — run mutation testing to verify tests catch real bugs
+      #           non-zero exit code means surviving mutations were found
+      - name: Run mutation tests
+        run: python -m mutmut run
+
+      # Step 7 — always print mutation results, even if step 6 failed,
+      #           so surviving mutations are visible in the CI log
+      - name: Show mutation results
+        if: always()
+        run: python -m mutmut results

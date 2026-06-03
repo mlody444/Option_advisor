@@ -1,4 +1,4 @@
-# Run all checks including mutation testing (slow).
+# Run fast checks (lint, format, types, docs, security, tests).
 # Must be run from the project root directory.
 
 $scripts = [ordered]@{
@@ -8,8 +8,6 @@ $scripts = [ordered]@{
     "Pydoclint"   = ".\drafts\check_docs.ps1"
     "Security"    = ".\drafts\check_security.ps1"
     "Pytest (offline)" = ".\drafts\check_tests.ps1"
-    "Pytest (live)"    = ".\drafts\check_live.ps1"
-    "Mutmut"           = ".\drafts\check_mutmut.ps1"
 }
 
 $results = [ordered]@{}

@@ -23,6 +23,11 @@ dev = [
     "mypy>=2.1.0",
     "pip-audit>=2.10.0",
     "pydoclint>=0.8.4",
+    "hypothesis>=6.0",
+    "mutmut<3",  # v3 has WSL compatibility issues — stay on v2
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "pytest-mock>=3.14",
     "ruff>=0.15.13",
     "setuptools>=78.1.1",
 ]
@@ -30,7 +35,7 @@ dev = [
 # ── setuptools ───────────────────────────────────────────────────────────────
 
 [tool.setuptools.packages.find]
-exclude = ["drafts*"]  # drafts/ contains exploratory scripts, not distributable packages
+exclude = ["drafts*", "tests*"]  # not distributable — drafts/ is exploratory scripts, tests/ is test suite
 
 # ── mypy ─────────────────────────────────────────────────────────────────────
 
@@ -48,6 +53,24 @@ ignore_missing_imports = true
 
 [tool.pydoclint]
 style = "google"
+
+# ── pytest ───────────────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+markers   = [
+    "live: requires a live TWS connection — skipped in CI",
+]
+
+# ── mutmut ───────────────────────────────────────────────────────────────────
+# Pinned to v2 (<3): v3 introduced WSL compatibility issues in this project.
+# v3 would have allowed --workers for parallel mutant execution.
+
+[tool.mutmut]
+paths_to_mutate = "drafts/ibkr_utils.py"
+tests_dir = "tests/unit/"
+runner = "pytest -x -m 'not live'"
 
 # ── ruff ─────────────────────────────────────────────────────────────────────
 
