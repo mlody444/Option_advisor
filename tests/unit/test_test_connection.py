@@ -647,3 +647,9 @@ class TestErrorCallback:
         with caplog.at_level(logging.DEBUG):
             app.error("not-an-int", "not-an-int")   # too few args, no int in positions 1 or 2
         assert caplog.messages == []
+
+    def test_pos_pre_10_30_signature_parsed_and_logged(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        # pre-10.30 ibapi omits errorTime — signature is (reqId:int, errorCode:int, errorString:str)
+        app = make_app()
+        app.error(5, 9999, "pre-10.30 error message")
+        assert caplog.messages == ["IBKR 9999 (req 5): pre-10.30 error message"]
